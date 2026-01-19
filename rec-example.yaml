@@ -1,0 +1,213 @@
+# ============================================================
+# CELINE REC REGISTRY – SAMPLE COMMUNITY DEFINITION (DEV)
+# ============================================================
+# This file defines the *entire* structure of a Renewable Energy
+# Community (REC) for registry and Digital Twin bootstrapping.
+#
+# Import semantics:
+# - This file replaces the full definition of the community.
+# - Re-importing the same file is idempotent.
+# - Local "key" values are expanded into canonical IRIs
+#   like: https://<host>/communities/{community_key}/assets/{asset_key}
+# ============================================================
+
+version: 1
+
+# JSON-LD context used by the API
+context: https://localhost:8000/contexts/celine/v1
+
+# ------------------------------------------------------------
+# COMMUNITY (REC)
+# ------------------------------------------------------------
+community:
+  # Local identifier for the community
+  # Used to build canonical IRIs and API URLs
+  key: trentino_demo
+
+  # Human-readable name
+  name: Trentino Demo Energy Community
+
+  # Optional description
+  description: >
+    Demonstration Renewable Energy Community located in Trentino (IT),
+    used for local development and Digital Twin testing.
+
+  # Optional external identifier (e.g. registry or project code)
+  external_id: REC-TN-001
+
+  # Optional tags for filtering or discovery
+  tags: [demo, trentino, italy]
+
+  # Optional validity start (ISO 8601)
+  valid_from: 2025-01-01T00:00:00Z
+
+# ------------------------------------------------------------
+# PARTICIPANTS
+# ------------------------------------------------------------
+# Legal or physical entities participating in the REC.
+# They become members via the "memberships" section.
+participants:
+  - key: municipality_trento
+    name: Municipality of Trento
+    kind: public_body # person | organization | public_body
+    external_id: P-001
+    roles: [producer]
+    contacts:
+      email: energy@comune.trento.it
+
+  - key: residential_condo
+    name: Residential Condominium Via Roma
+    kind: organization
+    external_id: P-002
+    roles: [prosumer]
+
+  - key: mario_rossi
+    name: Mario Rossi
+    kind: person
+    external_id: P-003
+    roles: [consumer]
+
+# ------------------------------------------------------------
+# MEMBERSHIPS
+# ------------------------------------------------------------
+# First-class membership objects.
+# These define roles, validity, and governance-related metadata.
+memberships:
+  - participant: municipality_trento
+    role: producer
+    valid_from: 2025-01-01T00:00:00Z
+    voting_weight: 2.0
+
+  - participant: residential_condo
+    role: prosumer
+    valid_from: 2025-01-01T00:00:00Z
+    voting_weight: 1.0
+
+  - participant: mario_rossi
+    role: consumer
+    valid_from: 2025-02-01T00:00:00Z
+    voting_weight: 0.5
+
+# ------------------------------------------------------------
+# SITES
+# ------------------------------------------------------------
+# Physical locations where assets and meters are installed.
+sites:
+  - key: site_via_roma_10
+    name: Via Roma 10 – Residential Building
+    address: Via Roma 10, Trento, Italy
+    geo:
+      lat: 46.0664
+      lon: 11.1258
+
+  - key: site_municipal_roof
+    name: Municipal Building Roof
+    address: Piazza Dante 1, Trento, Italy
+    geo:
+      lat: 46.0679
+      lon: 11.1211
+
+# ------------------------------------------------------------
+# METERS / PODs
+# ------------------------------------------------------------
+# Energy meters or Points of Delivery (POD).
+# These anchor measurements and asset connections.
+meters:
+  - key: pod_residential
+    name: Residential POD Via Roma
+    pod_code: IT001E123456789
+    site: site_via_roma_10
+
+  - key: pod_municipal
+    name: Municipal POD
+    pod_code: IT001E987654321
+    site: site_municipal_roof
+
+# ------------------------------------------------------------
+# ASSETS
+# ------------------------------------------------------------
+# Energy-related assets owned by participants.
+assets:
+  - key: pv_residential
+    name: Residential Rooftop PV
+    type: PV # PV | BATTERY | LOAD | EVSE | etc.
+    site: site_via_roma_10
+    owner: residential_condo
+    rated_power_kw: 30.0
+    meter: pod_residential
+
+  - key: battery_residential
+    name: Residential Battery
+    type: BATTERY
+    site: site_via_roma_10
+    owner: residential_condo
+    rated_power_kw: 20.0
+    rated_energy_kwh: 40.0
+    meter: pod_residential
+
+  - key: pv_municipal
+    name: Municipal Rooftop PV
+    type: PV
+    site: site_municipal_roof
+    owner: municipality_trento
+    rated_power_kw: 50.0
+    meter: pod_municipal
+
+# ------------------------------------------------------------
+# TARIFFS
+# ------------------------------------------------------------
+# Tariffs applicable within the REC.
+tariffs:
+  - key: default_tariff
+    name: Default Community Tariff
+    currency: EUR
+    notes: >
+      Simplified tariff used for development and testing purposes.
+
+# ------------------------------------------------------------
+# TIME SERIES DEFINITIONS (REGISTRY ONLY)
+# ------------------------------------------------------------
+# These define *what* time series exist, not the data points.
+timeseries:
+  - key: ts_pv_residential_power
+    name: Residential PV Active Power
+    metric: active_power
+    unit: kW
+    observed_entity: pv_residential
+
+  - key: ts_community_load
+    name: Community Load Power
+    metric: active_power
+    unit: kW
+    observed_entity: trentino_demo
+
+# ------------------------------------------------------------
+# TOPOLOGY
+# ------------------------------------------------------------
+# Explicit graph edges describing how entities are connected.
+# Used by Digital Twin and simulation services.
+topology:
+  edges:
+    - from: pv_residential
+      predicate: connected_to
+      to: pod_residential
+
+    - from: battery_residential
+      predicate: connected_to
+      to: pod_residential
+
+    - from: pod_residential
+      predicate: located_at
+      to: site_via_roma_10
+
+    - from: pv_municipal
+      predicate: connected_to
+      to: pod_municipal
+
+    - from: pod_municipal
+      predicate: located_at
+      to: site_municipal_roof
+
+    - from: pv_residential
+      predicate: part_of
+      to: trentino_demo
