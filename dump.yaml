@@ -1,0 +1,11 @@
+# Dumpster configuration
+output: sources.txt
+extensions:
+  - .py
+  - .md
+  - .yaml
+  - .txt
+contents:
+  - celine
+  - alembic
+  - pyproject.toml

@@ -1,0 +1,43 @@
+volumes:
+  pgdata:
+
+services:
+  db:
+    image: postgres:17.4
+    environment:
+      POSTGRES_DB: celine_rec_registry
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d celine_rec_registry"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./celine:/app/celine
+    command: >-
+      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/healthz'').read();"',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
