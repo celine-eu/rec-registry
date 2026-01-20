@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,8 +29,8 @@ class ParticipantBlock(ImportModel):
 class MembershipBlock(ImportModel):
     participant: str
     role: str
-    valid_from: Optional[str] = None
-    valid_to: Optional[str] = None
+    valid_from: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
     voting_weight: Optional[float] = None
 
 

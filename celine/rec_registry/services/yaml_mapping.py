@@ -5,19 +5,31 @@ from datetime import datetime, timezone
 
 from celine.rec_registry.schemas.import_yaml import CommunityImportDoc
 
+from celine.rec_registry.models import (
+    Asset,
+    Community,
+    Membership,
+    Meter,
+    Participant,
+    Site,
+    Tariff,
+    TimeSeries,
+    TopologyEdge,
+)
+
 
 @dataclass
 class MappedCommunity:
     community_key: str
-    community: object
-    participants: list[object]
-    memberships: list[object]
-    sites: list[object]
-    meters: list[object]
-    assets: list[object]
-    tariffs: list[object]
-    timeseries: list[object]
-    topology_edges: list[object]
+    community: Community
+    participants: list[Participant]
+    memberships: list[Membership]
+    sites: list[Site]
+    meters: list[Meter]
+    assets: list[Asset]
+    tariffs: list[Tariff]
+    timeseries: list[TimeSeries]
+    topology_edges: list[TopologyEdge]
 
 
 def map_yaml_to_orm(doc: CommunityImportDoc):
@@ -25,17 +37,6 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
 
     This is the *single* adaptation point for YAML structure changes.
     """
-    from celine.rec_registry.models import (
-        Asset,
-        Community,
-        Membership,
-        Meter,
-        Participant,
-        Site,
-        Tariff,
-        TimeSeries,
-        TopologyEdge,
-    )
 
     community = Community(
         key=doc.community.key,
@@ -68,7 +69,14 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
     for s in doc.sites:
         lat = s.geo.lat if s.geo else None
         lon = s.geo.lon if s.geo else None
-        site = Site(key=s.key, name=s.name, address=s.address, lat=lat, lon=lon)
+        site = Site(
+            key=s.key,
+            name=s.name,
+            address=s.address,
+            lat=lat,
+            lon=lon,
+            community=community,
+        )
         sites.append(site)
         site_by_key[s.key] = site
 
@@ -90,6 +98,7 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
             asset_type=a.type,
             rated_power_kw=a.rated_power_kw,
             rated_energy_kwh=a.rated_energy_kwh,
+            community=community,
         )
         if a.site:
             if a.site not in site_by_key:
@@ -97,21 +106,35 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
             asset.site = site_by_key[a.site]
         if a.meter:
             if a.meter not in meter_by_key:
-                raise ValueError(f"Asset '{a.key}' references unknown meter '{a.meter}'")
+                raise ValueError(
+                    f"Asset '{a.key}' references unknown meter '{a.meter}'"
+                )
             asset.meter = meter_by_key[a.meter]
         if a.owner:
             if a.owner not in participant_by_key:
-                raise ValueError(f"Asset '{a.key}' references unknown owner '{a.owner}'")
+                raise ValueError(
+                    f"Asset '{a.key}' references unknown owner '{a.owner}'"
+                )
             asset.owner = participant_by_key[a.owner]
         assets.append(asset)
 
     tariffs: list[Tariff] = []
     for t in doc.tariffs:
-        tariffs.append(Tariff(key=t.key, name=t.name, currency=t.currency, notes=t.notes))
+        tariffs.append(
+            Tariff(
+                key=t.key,
+                name=t.name,
+                currency=t.currency,
+                notes=t.notes,
+                community=community,
+            )
+        )
 
-    def _parse_dt(value: str | None):
+    def _parse_dt(value: str | datetime | None):
         if not value:
             return None
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc)
         # Accept RFC3339-like strings (e.g. 2025-01-01T00:00:00Z)
         v = value.strip()
         if v.endswith("Z"):
@@ -121,7 +144,9 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
     memberships: list[Membership] = []
     for m in doc.memberships:
         if m.participant not in participant_by_key:
-            raise ValueError(f"Membership references unknown participant '{m.participant}'")
+            raise ValueError(
+                f"Membership references unknown participant '{m.participant}'"
+            )
         memberships.append(
             Membership(
                 participant=participant_by_key[m.participant],
@@ -129,6 +154,7 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
                 valid_from=_parse_dt(m.valid_from),
                 valid_to=_parse_dt(m.valid_to),
                 voting_weight=m.voting_weight,
+                community=community,
             )
         )
 
@@ -139,13 +165,17 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
             name=ts.name,
             metric=ts.metric,
             unit=ts.unit,
-            observed_entity_kind="community" if ts.observed_entity == doc.community.key else "asset",
+            observed_entity_kind=(
+                "community" if ts.observed_entity == doc.community.key else "asset"
+            ),
         )
         if t.observed_entity_kind == "asset":
             # observed_entity is an asset key
             asset_lookup = {a.key: a for a in assets}
             if ts.observed_entity not in asset_lookup:
-                raise ValueError(f"TimeSeries '{ts.key}' references unknown asset '{ts.observed_entity}'")
+                raise ValueError(
+                    f"TimeSeries '{ts.key}' references unknown asset '{ts.observed_entity}'"
+                )
             t.observed_entity = asset_lookup[ts.observed_entity]
         timeseries.append(t)
 

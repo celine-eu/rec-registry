@@ -1,11 +1,8 @@
 version: "3"
 
 vars:
-  PYTHON: python
-  UV: uv
+  EXEC: docker compose exec api uv run
   APP: celine.rec_registry.main:app
-  HOST: 0.0.0.0
-  PORT: 8000
 
 tasks:
   default:
@@ -13,77 +10,38 @@ tasks:
     cmds:
       - task --list
 
-  install:
-    desc: Install dependencies using uv
-    cmds:
-      - "{{.UV}} sync"
-
-  format:
-    desc: Format code (if ruff is added later). Placeholder.
-    cmds:
-      - echo "No formatter configured. Add ruff/black if desired."
-
   run:
-    desc: Run the API locally (reload)
+    desc: Start services
     cmds:
-      - "{{.UV}} run uvicorn {{.APP}} --host {{.HOST}} --port {{.PORT}} --reload"
-
-  test:
-    desc: Run tests (if added later)
-    cmds:
-      - echo "No tests configured yet."
-
-  db:up:
-    desc: Start PostgreSQL via docker compose
-    cmds:
-      - docker compose up -d db
-
-  db:down:
-    desc: Stop PostgreSQL
-    cmds:
-      - docker compose down
+      - docker compose up -d
 
   db:reset:
+    deps: [run]
     desc: Drop and recreate Postgres volume (DANGEROUS)
     cmds:
       - docker compose down -v
       - docker compose up -d db
 
   db:migrate:
+    deps: [run]
     desc: Apply Alembic migrations (upgrade head)
-    env:
-      DATABASE_URL: "{{.DATABASE_URL}}"
-    deps: [install]
     cmds:
-      - "{{.UV}} run alembic upgrade head"
+      - "{{.EXEC}} alembic upgrade head"
 
   db:revision:
+    deps: [run]
     desc: "Create a new Alembic revision (autogenerate). Usage: task db:revision -- -m <message>"
-    env:
-      DATABASE_URL: "{{.DATABASE_URL}}"
-    deps: [install]
     cmds:
-      - "{{.UV}} run alembic revision --autogenerate {{.CLI_ARGS}}"
+      - "{{.EXEC}} alembic revision --autogenerate {{.CLI_ARGS}}"
 
   import:community:
+    deps: [run]
     desc: "Import a community YAML (REPLACE mode). Usage: task import:community -- --file path.yaml"
-    env:
-      DATABASE_URL: "{{.DATABASE_URL}}"
-    deps: [install]
     cmds:
-      - "{{.UV}} run celine-rec-registry import community {{.CLI_ARGS}}"
+      - "{{.EXEC}} celine-rec-registry import community {{.CLI_ARGS}}"
 
-  dev:up:
-    desc: Start dev stack (db + api)
+  import:community:example:
+    deps: [run]
+    desc: "Import community example"
     cmds:
-      - docker compose up -d --build
-
-  dev:logs:
-    desc: Tail API logs
-    cmds:
-      - docker compose logs -f api
-
-  dev:ps:
-    desc: Show compose services
-    cmds:
-      - docker compose ps
+      - task import:community -- --file rec-example.yaml

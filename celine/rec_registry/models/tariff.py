@@ -9,7 +9,9 @@ from .base import Base, TimestampMixin, UUIDMixin
 class Tariff(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "tariff"
 
-    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+    community_id: Mapped[str] = mapped_column(
+        ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(250), nullable=False)

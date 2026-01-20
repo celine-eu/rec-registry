@@ -11,14 +11,19 @@ from celine.rec_registry.schemas.import_yaml import CommunityImportDoc
 from celine.rec_registry.services.importer import replace_community_from_doc
 
 app = typer.Typer(add_completion=False, help="CELINE REC Registry CLI")
+
 import_app = typer.Typer(name="import", help="Import registry structures")
 app.add_typer(import_app)
 
 
 @import_app.command("community")
 def import_community(
-    file: Path = typer.Option(..., "--file", "-f", exists=True, dir_okay=False, readable=True),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Validate and print counts without writing"),
+    file: Path = typer.Option(
+        ..., "--file", "-f", exists=True, dir_okay=False, readable=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and print counts without writing"
+    ),
 ):
     """Replace a community registry definition from an ergonomic YAML file."""
 
