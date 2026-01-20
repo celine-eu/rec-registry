@@ -55,12 +55,14 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
         email = None
         if isinstance(p.contacts, dict):
             email = p.contacts.get("email")
+
         participant = Participant(
             key=p.key,
             name=p.name,
             kind=p.kind,
             external_id=p.external_id,
             email=email,
+            community=community,
         )
         participants.append(participant)
         participant_by_key[p.key] = participant
@@ -82,7 +84,7 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
 
     meters: list[Meter] = []
     for m in doc.meters:
-        meter = Meter(key=m.key, name=m.name, pod_code=m.pod_code)
+        meter = Meter(key=m.key, name=m.name, pod_code=m.pod_code, community=community)
         if m.site:
             if m.site not in site_by_key:
                 raise ValueError(f"Meter '{m.key}' references unknown site '{m.site}'")
@@ -168,6 +170,7 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
             observed_entity_kind=(
                 "community" if ts.observed_entity == doc.community.key else "asset"
             ),
+            community=community,
         )
         if t.observed_entity_kind == "asset":
             # observed_entity is an asset key
@@ -203,6 +206,7 @@ def map_yaml_to_orm(doc: CommunityImportDoc):
                     predicate=e.predicate,
                     dst_key=dst_key,
                     dst_type=known_keys[dst_key],
+                    community=community
                 )
             )
 
