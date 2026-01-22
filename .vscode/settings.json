@@ -1,5 +1,12 @@
 {
     "python.analysis.extraPaths": [
         "celine"
-    ]
+    ],
+    "yaml.schemas": {
+        "schemas/community/v0.3/community.schema.json": [
+            "rec/*.yaml",
+            "**/rec*.yaml",
+            "**/rec*.yml"
+        ]
+    }
 }

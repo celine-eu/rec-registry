@@ -1,0 +1,758 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://celine-eu.github.io/ontologies/schema/rec-registry.v0.3.schema.json",
+  "title": "CELINE REC Registry Manifest Schema (v0.3)",
+  "description": "JSON Schema for the CELINE REC Registry Manifest aligned to celine.v0.3.ttl. Intended for validating YAML (after YAML->JSON parsing).",
+  "type": "object",
+  "required": [
+    "version",
+    "kind",
+    "context",
+    "community",
+    "participants",
+    "memberships"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "const": "celine.rec.registry.v0.3"
+    },
+    "context": {
+      "$ref": "#/$defs/Context"
+    },
+    "catalogs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Catalog"
+      },
+      "default": []
+    },
+    "datasets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Dataset"
+      },
+      "default": []
+    },
+    "distributions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Distribution"
+      },
+      "default": []
+    },
+    "community": {
+      "$ref": "#/$defs/Community"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Participant"
+      },
+      "minItems": 1
+    },
+    "memberships": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Membership"
+      },
+      "minItems": 1
+    },
+    "sites": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Site"
+      },
+      "default": []
+    },
+    "topology": {
+      "$ref": "#/$defs/Topology",
+      "default": {}
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Asset"
+      },
+      "default": []
+    },
+    "meters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Meter"
+      },
+      "default": []
+    },
+    "tariffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Tariff"
+      },
+      "default": []
+    },
+    "tariff_assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TariffAssignment"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "Key": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Stable registry key. Allowed: letters, digits, dot, underscore, colon, dash."
+    },
+    "URI": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1
+    },
+    "CURIEorURI": {
+      "type": "string",
+      "minLength": 1
+    },
+    "TypeTag": {
+      "type": "string",
+      "minLength": 1,
+      "description": "RDF class CURIE/IRI used as a hint (e.g., celine:EnergyCommunity, dcat:Dataset)."
+    },
+    "StringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "Context": {
+      "type": "object",
+      "required": [
+        "base_iri",
+        "prefixes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "base_iri": {
+          "$ref": "#/$defs/URI"
+        },
+        "prefixes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/URI"
+          }
+        }
+      }
+    },
+    "Catalog": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "uri",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "dcat:Catalog"
+        },
+        "uri": {
+          "$ref": "#/$defs/URI"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        }
+      }
+    },
+    "Distribution": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "access_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "dcat:Distribution"
+        },
+        "access_url": {
+          "$ref": "#/$defs/URI"
+        },
+        "download_url": {
+          "$ref": "#/$defs/URI"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "Dataset": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "identifier",
+        "distributions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "dcat:Dataset"
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable dataset identifier in the Dataset API (often a CURIE)."
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "modeled_as": {
+          "$ref": "#/$defs/CURIEorURI",
+          "description": "Semantic hint for consumers (e.g., sosa:ObservationCollection, peco:Timeseries)."
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Routing hint (measurement, weather_observation, weather_forecast, flex_constraints, historical, topology_reference, etc.)."
+        },
+        "distributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "Area": {
+      "type": "object",
+      "required": [
+        "key",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "Community": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "name",
+        "operator_participant"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:EnergyCommunity"
+        },
+        "uri": {
+          "$ref": "#/$defs/URI"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "website": {
+          "$ref": "#/$defs/URI"
+        },
+        "operator_participant": {
+          "$ref": "#/$defs/Key",
+          "description": "Key of the participant acting as operator/representative."
+        },
+        "areas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Area"
+          },
+          "default": []
+        },
+        "catalogs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        }
+      }
+    },
+    "Contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "type": "string",
+          "minLength": 3
+        },
+        "address": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        }
+      }
+    },
+    "Participant": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "kind",
+        "name",
+        "auth_uri"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Participant"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "organization",
+            "individual",
+            "public_body",
+            "aggregator",
+            "other"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_uri": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IAM/SSO identity anchor; may be a CURIE like auth:users/..."
+        },
+        "external_ids": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "contact": {
+          "$ref": "#/$defs/Contact"
+        }
+      }
+    },
+    "Membership": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "community",
+        "participant",
+        "role",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Membership"
+        },
+        "community": {
+          "$ref": "#/$defs/Key"
+        },
+        "participant": {
+          "$ref": "#/$defs/Key"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prefer PECO role term, e.g., peco:Prosumer, peco:Consumer."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "inactive",
+            "pending",
+            "suspended"
+          ]
+        },
+        "valid_from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "Site": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Site"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "area": {
+          "$ref": "#/$defs/Key"
+        }
+      }
+    },
+    "CimRef": {
+      "type": "object",
+      "required": [
+        "mrid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mrid": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CIM IdentifiedObject.mRID"
+        },
+        "uri": {
+          "$ref": "#/$defs/URI"
+        }
+      }
+    },
+    "Substation": {
+      "type": "object",
+      "required": [
+        "key",
+        "kind",
+        "name",
+        "cim_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "secondary"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cim_ref": {
+          "$ref": "#/$defs/CimRef"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        }
+      }
+    },
+    "Topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "substations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Substation"
+          },
+          "minItems": 1,
+          "description": "Must include exactly one primary substation (enforced by service logic; JSON Schema cannot enforce exact-one-by-kind reliably)."
+        }
+      }
+    },
+    "OwnerRef": {
+      "type": "object",
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "participant",
+            "community"
+          ]
+        },
+        "ref": {
+          "$ref": "#/$defs/Key"
+        }
+      }
+    },
+    "Asset": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "category",
+        "name",
+        "owner"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Asset"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "pv | storage | evse | load | other (free text allowed)"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "located_at": {
+          "$ref": "#/$defs/Key"
+        },
+        "nominal_power_kwp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "capacity_kwh": {
+          "type": "number",
+          "minimum": 0
+        },
+        "external_asset_uri": {
+          "$ref": "#/$defs/URI"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        }
+      }
+    },
+    "Meter": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "owner"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Meter"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "located_at": {
+          "$ref": "#/$defs/Key"
+        },
+        "pod": {
+          "type": "string"
+        },
+        "sensor_id": {
+          "type": "string"
+        },
+        "supplied_by_substation": {
+          "$ref": "#/$defs/Key"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "default": []
+        }
+      }
+    },
+    "Tariff": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "name",
+        "currency"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:Tariff"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "peco_tariff_type": {
+          "type": "string"
+        },
+        "peco_tariff_base": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 currency code (e.g., EUR)."
+        },
+        "price_dataset": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Key"
+            }
+          ]
+        }
+      }
+    },
+    "TariffAssignment": {
+      "type": "object",
+      "required": [
+        "key",
+        "type",
+        "applies_to",
+        "tariff",
+        "direction",
+        "component",
+        "valid_from"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "type": {
+          "const": "celine:TariffAssignment"
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Key"
+          },
+          "minItems": 1
+        },
+        "tariff": {
+          "$ref": "#/$defs/Key"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "consumption",
+            "injection"
+          ]
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "retail_energy",
+            "network",
+            "incentive",
+            "other"
+          ]
+        },
+        "valid_from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

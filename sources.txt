@@ -1,0 +1,1777 @@
+# Code repository dump, each file is separated by # ---- file: <name of file>
+
+# Git metadata
+# working_dir: /home/lspxl/git/github.com/celine-eu/rec-registry
+# remote_url: git@github.com:celine-eu/rec-registry.git
+# remote_name: origin
+# branch: detached
+# commit: 8061d6815dd0bf12b804dd30e65d5dde9dd64d7e
+# commit_time: 2026-01-20T11:22:48+01:00
+# author: lcapra <luca.capra@spindox.it>
+# message: fix: review typing, fix referneces. Add workflows, add  semver
+# dirty: yes
+
+
+# ---- file: alembic/env.py
+from __future__ import annotations
+
+import os
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from celine.rec_registry.core.settings import settings
+from celine.rec_registry.models import Base
+
+# this is the Alembic Config object, which provides access to the values within
+# the .ini file in use.
+config = context.config
+
+# Interpret the config file for Python logging.
+if config.config_file_name is not None:
+    from logging.config import fileConfig
+
+    fileConfig(config.config_file_name)
+
+# Provide metadata for autogeneration.
+target_metadata = Base.metadata
+
+
+def _sync_url(async_url: str) -> str:
+    # Convert async SQLAlchemy URL to a sync URL for Alembic.
+    # postgresql+asyncpg:// -> postgresql+psycopg://
+    if "+asyncpg" in async_url:
+        return async_url.replace("+asyncpg", "+psycopg")
+    return async_url
+
+
+def run_migrations_offline() -> None:
+    url = _sync_url(os.getenv("DATABASE_URL", settings.database_url))
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    configuration = config.get_section(config.config_ini_section) or {}
+    configuration["sqlalchemy.url"] = _sync_url(os.getenv("DATABASE_URL", settings.database_url))
+
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+
+# ---- file: alembic/versions/0001_init.py
+"""init
+
+Revision ID: 0001_init
+Revises: 
+Create Date: 2026-01-19
+"""
+
+from __future__ import annotations
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "0001_init"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "community",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("external_id", sa.String(length=150), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_community_key", "community", ["key"], unique=True)
+    op.create_index("ix_community_external_id", "community", ["external_id"], unique=False)
+
+    op.create_table(
+        "participant",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("kind", sa.String(length=50), nullable=True),
+        sa.Column("external_id", sa.String(length=150), nullable=True),
+        sa.Column("email", sa.String(length=250), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_participant_community_id", "participant", ["community_id"], unique=False)
+    op.create_index("ix_participant_key", "participant", ["key"], unique=False)
+    op.create_index("ix_participant_external_id", "participant", ["external_id"], unique=False)
+    op.create_unique_constraint("uq_participant_community_key", "participant", ["community_id", "key"])
+
+    op.create_table(
+        "membership",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("participant_id", sa.UUID(as_uuid=True), sa.ForeignKey("participant.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("role", sa.String(length=80), nullable=False),
+        sa.Column("valid_from", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("voting_weight", sa.Numeric(12, 6), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_membership_community_id", "membership", ["community_id"], unique=False)
+    op.create_index("ix_membership_participant_id", "membership", ["participant_id"], unique=False)
+
+    op.create_table(
+        "site",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("address", sa.Text(), nullable=True),
+        sa.Column("lat", sa.Float(), nullable=True),
+        sa.Column("lon", sa.Float(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_site_community_id", "site", ["community_id"], unique=False)
+    op.create_index("ix_site_key", "site", ["key"], unique=False)
+    op.create_unique_constraint("uq_site_community_key", "site", ["community_id", "key"])
+
+    op.create_table(
+        "meter",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("site_id", sa.UUID(as_uuid=True), sa.ForeignKey("site.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("pod_code", sa.String(length=64), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_meter_community_id", "meter", ["community_id"], unique=False)
+    op.create_index("ix_meter_site_id", "meter", ["site_id"], unique=False)
+    op.create_index("ix_meter_key", "meter", ["key"], unique=False)
+    op.create_index("ix_meter_pod_code", "meter", ["pod_code"], unique=False)
+    op.create_unique_constraint("uq_meter_community_key", "meter", ["community_id", "key"])
+
+    op.create_table(
+        "asset",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("site_id", sa.UUID(as_uuid=True), sa.ForeignKey("site.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("meter_id", sa.UUID(as_uuid=True), sa.ForeignKey("meter.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("owner_id", sa.UUID(as_uuid=True), sa.ForeignKey("participant.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("asset_type", sa.String(length=50), nullable=False),
+        sa.Column("rated_power_kw", sa.Numeric(14, 6), nullable=True),
+        sa.Column("rated_energy_kwh", sa.Numeric(14, 6), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_asset_community_id", "asset", ["community_id"], unique=False)
+    op.create_index("ix_asset_site_id", "asset", ["site_id"], unique=False)
+    op.create_index("ix_asset_meter_id", "asset", ["meter_id"], unique=False)
+    op.create_index("ix_asset_owner_id", "asset", ["owner_id"], unique=False)
+    op.create_index("ix_asset_key", "asset", ["key"], unique=False)
+    op.create_unique_constraint("uq_asset_community_key", "asset", ["community_id", "key"])
+
+    op.create_table(
+        "tariff",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("currency", sa.String(length=10), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_tariff_community_id", "tariff", ["community_id"], unique=False)
+    op.create_index("ix_tariff_key", "tariff", ["key"], unique=False)
+    op.create_unique_constraint("uq_tariff_community_key", "tariff", ["community_id", "key"])
+
+    op.create_table(
+        "timeseries",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("observed_asset_id", sa.UUID(as_uuid=True), sa.ForeignKey("asset.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("name", sa.String(length=250), nullable=False),
+        sa.Column("metric", sa.String(length=100), nullable=False),
+        sa.Column("unit", sa.String(length=50), nullable=True),
+        sa.Column("observed_entity_kind", sa.String(length=50), nullable=False, server_default="asset"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_timeseries_community_id", "timeseries", ["community_id"], unique=False)
+    op.create_index("ix_timeseries_observed_asset_id", "timeseries", ["observed_asset_id"], unique=False)
+    op.create_index("ix_timeseries_key", "timeseries", ["key"], unique=False)
+    op.create_unique_constraint("uq_timeseries_community_key", "timeseries", ["community_id", "key"])
+
+    op.create_table(
+        "topology_edge",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("community_id", sa.UUID(as_uuid=True), sa.ForeignKey("community.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("src_key", sa.String(length=100), nullable=False),
+        sa.Column("src_type", sa.String(length=50), nullable=False),
+        sa.Column("predicate", sa.String(length=100), nullable=False),
+        sa.Column("dst_key", sa.String(length=100), nullable=False),
+        sa.Column("dst_type", sa.String(length=50), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_topology_edge_community_id", "topology_edge", ["community_id"], unique=False)
+    op.create_index("ix_topology_edge_src_key", "topology_edge", ["src_key"], unique=False)
+    op.create_index("ix_topology_edge_dst_key", "topology_edge", ["dst_key"], unique=False)
+    op.create_index("ix_topology_edge_predicate", "topology_edge", ["predicate"], unique=False)
+    op.create_unique_constraint(
+        "uq_topology_edge_unique",
+        "topology_edge",
+        ["community_id", "src_key", "src_type", "predicate", "dst_key", "dst_type"],
+    )
+
+
+def downgrade() -> None:
+    op.drop_table("topology_edge")
+    op.drop_table("timeseries")
+    op.drop_table("tariff")
+    op.drop_table("asset")
+    op.drop_table("meter")
+    op.drop_table("site")
+    op.drop_table("membership")
+    op.drop_table("participant")
+    op.drop_table("community")
+
+
+# ---- file: celine/rec_registry/__init__.py
+
+
+# ---- file: celine/rec_registry/api/__init__.py
+
+
+# ---- file: celine/rec_registry/api/communities.py
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from celine.rec_registry.db.session import get_session
+from celine.rec_registry.models import Community
+from celine.rec_registry.services.jsonld import build_community_graph, serialize_community
+from celine.rec_registry.services.iri import context_iri
+
+router = APIRouter(prefix="/communities", tags=["communities"])
+
+
+@router.get("")
+async def list_communities(
+    request: Request,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(Community)
+    if q:
+        stmt = stmt.where(Community.name.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Community.key).limit(min(limit, 500)).offset(max(offset, 0))
+    rows = (await session.scalars(stmt)).all()
+    base = str(request.base_url)
+    return {
+        "@context": context_iri(base),
+        "@graph": [serialize_community(base, c, include_context=False) for c in rows],
+    }
+
+
+@router.get("/{community_id}")
+async def get_community(
+    community_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    c = await session.scalar(select(Community).where(Community.key == community_id))
+    if not c:
+        raise HTTPException(status_code=404, detail="Community not found")
+    base = str(request.base_url)
+    return serialize_community(base, c, include_context=True)
+
+
+@router.get("/{community_id}/graph")
+async def get_community_graph(
+    community_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    return await build_community_graph(session=session, base_url=str(request.base_url), community_key=community_id)
+
+
+# ---- file: celine/rec_registry/api/meta.py
+from __future__ import annotations
+from pathlib import Path
+
+from fastapi import APIRouter
+
+from celine.rec_registry.core.settings import settings
+
+router = APIRouter(tags=["meta"])
+
+
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+# ---- file: celine/rec_registry/cli/__init__.py
+
+
+# ---- file: celine/rec_registry/cli/main.py
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import typer
+import yaml
+
+from celine.rec_registry.db.session import AsyncSessionLocal
+from celine.rec_registry.schemas.import_yaml import CommunityImportDoc
+from celine.rec_registry.services.importer import replace_community_from_doc
+
+app = typer.Typer(add_completion=False, help="CELINE REC Registry CLI")
+
+import_app = typer.Typer(name="import", help="Import registry structures")
+app.add_typer(import_app)
+
+
+@import_app.command("community")
+def import_community(
+    file: Path = typer.Option(
+        ..., "--file", "-f", exists=True, dir_okay=False, readable=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and print counts without writing"
+    ),
+):
+    """Replace a community registry definition from an ergonomic YAML file."""
+
+    payload = yaml.safe_load(file.read_text(encoding="utf-8"))
+    doc = CommunityImportDoc.model_validate(payload)
+
+    async def _run():
+        async with AsyncSessionLocal() as session:
+            if dry_run:
+                # Just map + basic validation; no DB writes
+                from celine.rec_registry.services.yaml_mapping import map_yaml_to_orm
+
+                mapped = map_yaml_to_orm(doc)
+                return {
+                    "community": mapped.community_key,
+                    "participants": len(mapped.participants),
+                    "memberships": len(mapped.memberships),
+                    "sites": len(mapped.sites),
+                    "meters": len(mapped.meters),
+                    "assets": len(mapped.assets),
+                    "tariffs": len(mapped.tariffs),
+                    "timeseries": len(mapped.timeseries),
+                    "topology_edges": len(mapped.topology_edges),
+                    "mode": "REPLACE (dry-run)",
+                }
+
+            stats = await replace_community_from_doc(session, doc)
+            await session.commit()
+            stats["community"] = doc.community.key
+            stats["mode"] = "REPLACE"
+            return stats
+
+    result = asyncio.run(_run())
+    typer.echo(yaml.safe_dump(result, sort_keys=False))
+
+
+if __name__ == "__main__":
+    app()
+
+
+# ---- file: celine/rec_registry/core/__init__.py
+
+
+# ---- file: celine/rec_registry/core/settings.py
+from __future__ import annotations
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    database_url: str = (
+        "postgresql+asyncpg://postgres:postgres@db:5432/celine_rec_registry"
+    )
+    context_version: str = "v1"
+
+
+settings = Settings()
+
+
+# ---- file: celine/rec_registry/db/__init__.py
+
+
+# ---- file: celine/rec_registry/db/session.py
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from celine.rec_registry.core.settings import settings
+
+
+def make_async_engine():
+    return create_async_engine(settings.database_url, pool_pre_ping=True)
+
+
+engine = make_async_engine()
+AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+# ---- file: celine/rec_registry/main.py
+from __future__ import annotations
+
+from fastapi import FastAPI
+
+from celine.rec_registry.api.communities import router as communities_router
+from celine.rec_registry.api.meta import router as meta_router
+
+app = FastAPI(title="CELINE REC Registry", version="0.1.0")
+
+app.include_router(meta_router)
+app.include_router(communities_router)
+
+
+# ---- file: celine/rec_registry/models/__init__.py
+from .base import Base
+from .community import Community
+from .participant import Participant
+from .membership import Membership
+from .site import Site
+from .meter import Meter
+from .asset import Asset
+from .tariff import Tariff
+from .timeseries import TimeSeries
+from .topology import TopologyEdge
+
+__all__ = [
+    "Base",
+    "Community",
+    "Participant",
+    "Membership",
+    "Site",
+    "Meter",
+    "Asset",
+    "Tariff",
+    "TimeSeries",
+    "TopologyEdge",
+]
+
+
+# ---- file: celine/rec_registry/models/asset.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Asset(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "asset"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("site.id", ondelete="SET NULL"), nullable=True, index=True)
+    meter_id: Mapped[str | None] = mapped_column(ForeignKey("meter.id", ondelete="SET NULL"), nullable=True, index=True)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("participant.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(50), nullable=False)  # PV|BATTERY|EVSE|LOAD|METER|...
+
+    rated_power_kw: Mapped[object | None] = mapped_column(Numeric(14, 6), nullable=True)
+    rated_energy_kwh: Mapped[object | None] = mapped_column(Numeric(14, 6), nullable=True)
+
+    community = relationship("Community", back_populates="assets")
+    site = relationship("Site", back_populates="assets")
+    meter = relationship("Meter", back_populates="assets")
+    owner = relationship("Participant", back_populates="assets")
+    timeseries = relationship("TimeSeries", back_populates="observed_entity")
+
+
+# ---- file: celine/rec_registry/models/base.py
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    """Declarative base."""
+
+
+class UUIDMixin:
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+
+class TimestampMixin:
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[object] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+# ---- file: celine/rec_registry/models/community.py
+from __future__ import annotations
+
+from sqlalchemy import String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Community(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "community"
+
+    # URL path component (used in API as /communities/{key})
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+
+    participants = relationship("Participant", back_populates="community", cascade="all, delete-orphan")
+    memberships = relationship("Membership", back_populates="community", cascade="all, delete-orphan")
+    sites = relationship("Site", back_populates="community", cascade="all, delete-orphan")
+    meters = relationship("Meter", back_populates="community", cascade="all, delete-orphan")
+    assets = relationship("Asset", back_populates="community", cascade="all, delete-orphan")
+    tariffs = relationship("Tariff", back_populates="community", cascade="all, delete-orphan")
+    timeseries = relationship("TimeSeries", back_populates="community", cascade="all, delete-orphan")
+    topology_edges = relationship("TopologyEdge", back_populates="community", cascade="all, delete-orphan")
+
+
+# ---- file: celine/rec_registry/models/membership.py
+from __future__ import annotations
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Membership(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "membership"
+
+    community_id: Mapped[str] = mapped_column(
+        ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    participant_id: Mapped[str] = mapped_column(
+        ForeignKey("participant.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    role: Mapped[str] = mapped_column(String(80), nullable=False)
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    voting_weight: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
+
+    community = relationship("Community", back_populates="memberships")
+    participant = relationship("Participant", back_populates="memberships")
+
+
+# ---- file: celine/rec_registry/models/meter.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Meter(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "meter"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("site.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    pod_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    community = relationship("Community", back_populates="meters")
+    site = relationship("Site", back_populates="meters")
+    assets = relationship("Asset", back_populates="meter")
+
+
+# ---- file: celine/rec_registry/models/participant.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Participant(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "participant"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    kind: Mapped[str | None] = mapped_column(String(50), nullable=True)  # person|organization|public_body
+    external_id: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(250), nullable=True)
+
+    community = relationship("Community", back_populates="participants")
+    memberships = relationship("Membership", back_populates="participant", cascade="all, delete-orphan")
+    assets = relationship("Asset", back_populates="owner")
+
+
+# ---- file: celine/rec_registry/models/site.py
+from __future__ import annotations
+
+from sqlalchemy import Float, ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Site(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "site"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    community = relationship("Community", back_populates="sites")
+    meters = relationship("Meter", back_populates="site")
+    assets = relationship("Asset", back_populates="site")
+
+
+# ---- file: celine/rec_registry/models/tariff.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class Tariff(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "tariff"
+
+    community_id: Mapped[str] = mapped_column(
+        ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    community = relationship("Community", back_populates="tariffs")
+
+
+# ---- file: celine/rec_registry/models/timeseries.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class TimeSeries(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "timeseries"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+    observed_asset_id: Mapped[str | None] = mapped_column(ForeignKey("asset.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(250), nullable=False)
+    metric: Mapped[str] = mapped_column(String(100), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    observed_entity_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="asset")  # asset|community
+
+    community = relationship("Community", back_populates="timeseries")
+    observed_entity = relationship("Asset", back_populates="timeseries")
+
+
+# ---- file: celine/rec_registry/models/topology.py
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+
+class TopologyEdge(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "topology_edge"
+
+    community_id: Mapped[str] = mapped_column(ForeignKey("community.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    src_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    src_type: Mapped[str] = mapped_column(String(50), nullable=False)  # community|participant|membership|site|meter|asset|tariff|timeseries
+    predicate: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    dst_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    dst_type: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    community = relationship("Community", back_populates="topology_edges")
+
+
+# ---- file: celine/rec_registry/schemas/__init__.py
+
+
+# ---- file: celine/rec_registry/schemas/entities.py
+from __future__ import annotations
+
+from typing import Any, List, Optional
+
+from pydantic import Field
+
+from .jsonld import JsonLdNode
+
+
+class CommunityRead(JsonLdNode):
+    name: str
+    description: Optional[str] = None
+    external_id: Optional[str] = None
+
+
+class ParticipantRead(JsonLdNode):
+    name: str
+    kind: Optional[str] = None
+    external_id: Optional[str] = None
+    email: Optional[str] = None
+
+
+class MembershipRead(JsonLdNode):
+    participant: str = Field(alias="participant")
+    role: str
+    valid_from: Optional[str] = Field(default=None, alias="validFrom")
+    valid_to: Optional[str] = Field(default=None, alias="validTo")
+    voting_weight: Optional[float] = Field(default=None, alias="votingWeight")
+
+
+class SiteRead(JsonLdNode):
+    name: str
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+class MeterRead(JsonLdNode):
+    name: str
+    pod_code: Optional[str] = Field(default=None, alias="podCode")
+    site: Optional[str] = None
+
+
+class AssetRead(JsonLdNode):
+    name: str
+    asset_type: str = Field(alias="assetType")
+    site: Optional[str] = None
+    meter: Optional[str] = None
+    owner: Optional[str] = None
+    rated_power_kw: Optional[float] = Field(default=None, alias="ratedPowerKw")
+    rated_energy_kwh: Optional[float] = Field(default=None, alias="ratedEnergyKwh")
+
+
+class TariffRead(JsonLdNode):
+    name: str
+    currency: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TimeSeriesRead(JsonLdNode):
+    name: str
+    metric: str
+    unit: Optional[str] = None
+    observed_entity: str = Field(alias="observedEntity")
+
+
+class TopologyEdgeRead(JsonLdNode):
+    from_id: str = Field(alias="from")
+    predicate: str
+    to_id: str = Field(alias="to")
+
+
+# ---- file: celine/rec_registry/schemas/import_yaml.py
+from __future__ import annotations
+
+from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ImportModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class CommunityBlock(ImportModel):
+    key: str
+    name: str
+    description: Optional[str] = None
+    external_id: Optional[str] = None
+
+
+class ParticipantBlock(ImportModel):
+    key: str
+    name: str
+    kind: Optional[str] = None
+    external_id: Optional[str] = None
+    contacts: Optional[dict] = None
+    roles: Optional[List[str]] = None
+
+
+class MembershipBlock(ImportModel):
+    participant: str
+    role: str
+    valid_from: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
+    voting_weight: Optional[float] = None
+
+
+class SiteGeo(ImportModel):
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+class SiteBlock(ImportModel):
+    key: str
+    name: str
+    address: Optional[str] = None
+    geo: Optional[SiteGeo] = None
+
+
+class MeterBlock(ImportModel):
+    key: str
+    name: str
+    pod_code: Optional[str] = None
+    site: Optional[str] = None
+
+
+class AssetBlock(ImportModel):
+    key: str
+    name: str
+    type: str
+    site: Optional[str] = None
+    meter: Optional[str] = None
+    owner: Optional[str] = None
+    rated_power_kw: Optional[float] = None
+    rated_energy_kwh: Optional[float] = None
+
+
+class TariffBlock(ImportModel):
+    key: str
+    name: str
+    currency: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TimeSeriesBlock(ImportModel):
+    key: str
+    name: str
+    metric: str
+    unit: Optional[str] = None
+    observed_entity: str
+
+
+class TopologyEdgeBlock(ImportModel):
+    from_: str = Field(alias="from")
+    predicate: str
+    to: str
+
+
+class TopologyBlock(ImportModel):
+    edges: List[TopologyEdgeBlock] = []
+
+
+class CommunityImportDoc(ImportModel):
+    version: int = 1
+    context: Optional[str] = None
+
+    community: CommunityBlock
+    participants: List[ParticipantBlock] = []
+    memberships: List[MembershipBlock] = []
+    sites: List[SiteBlock] = []
+    meters: List[MeterBlock] = []
+    assets: List[AssetBlock] = []
+    tariffs: List[TariffBlock] = []
+    timeseries: List[TimeSeriesBlock] = []
+    topology: Optional[TopologyBlock] = None
+
+
+# ---- file: celine/rec_registry/schemas/jsonld.py
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class JsonLdModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class JsonLdNode(JsonLdModel):
+    context: Optional[str] = Field(default=None, alias="@context")
+    id: str = Field(alias="@id")
+    type: Any = Field(alias="@type")
+
+
+class GraphDocument(JsonLdModel):
+    context: str = Field(alias="@context")
+    graph: List[Dict[str, Any]] = Field(alias="@graph")
+
+
+# ---- file: celine/rec_registry/services/__init__.py
+
+
+# ---- file: celine/rec_registry/services/importer.py
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from celine.rec_registry.models import (
+    Asset,
+    Community,
+    Membership,
+    Meter,
+    Participant,
+    Site,
+    Tariff,
+    TimeSeries,
+    TopologyEdge,
+)
+from celine.rec_registry.schemas.import_yaml import CommunityImportDoc
+from celine.rec_registry.services.yaml_mapping import map_yaml_to_orm
+
+
+def _stable_hash(payload: Any) -> str:
+    data = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
+
+
+async def replace_community_from_doc(
+    session: AsyncSession, doc: CommunityImportDoc
+) -> dict[str, int | str]:
+    """Replace a community definition (drop previous, insert new).
+
+    Idempotent: importing the same content yields the same final state.
+    """
+    mapped = map_yaml_to_orm(doc)
+
+    # Load existing community by key, if any
+    existing = await session.scalar(
+        select(Community).where(Community.key == mapped.community_key)
+    )
+
+    if existing:
+        # Delete dependents explicitly (avoid relying on ORM cascades for bulk ops)
+        cid = existing.id
+        await session.execute(
+            delete(TopologyEdge).where(TopologyEdge.community_id == cid)
+        )
+        await session.execute(delete(TimeSeries).where(TimeSeries.community_id == cid))
+        await session.execute(delete(Tariff).where(Tariff.community_id == cid))
+        await session.execute(delete(Asset).where(Asset.community_id == cid))
+        await session.execute(delete(Meter).where(Meter.community_id == cid))
+        await session.execute(delete(Site).where(Site.community_id == cid))
+        await session.execute(delete(Membership).where(Membership.community_id == cid))
+        await session.execute(
+            delete(Participant).where(Participant.community_id == cid)
+        )
+        await session.execute(delete(Community).where(Community.id == cid))
+        await session.flush()
+
+    # Insert new graph
+    session.add(mapped.community)
+    await session.flush()  # get community id
+
+    community_id = str(mapped.community.id)
+
+    for p in mapped.participants:
+        p.community_id = community_id
+        session.add(p)
+    await session.flush()
+
+    for s in mapped.sites:
+        s.community_id = community_id
+        session.add(s)
+    await session.flush()
+
+    for m in mapped.meters:
+        m.community_id = community_id
+        session.add(m)
+    await session.flush()
+
+    for a in mapped.assets:
+        a.community_id = community_id
+        session.add(a)
+    await session.flush()
+
+    for t in mapped.tariffs:
+        t.community_id = community_id
+        session.add(t)
+    await session.flush()
+
+    for ts in mapped.timeseries:
+        ts.community_id = community_id
+        session.add(ts)
+    await session.flush()
+
+    for mem in mapped.memberships:
+        mem.community_id = community_id
+        session.add(mem)
+    await session.flush()
+
+    for e in mapped.topology_edges:
+        e.community_id = community_id
+        session.add(e)
+    await session.flush()
+
+    return {
+        "participants": len(mapped.participants),
+        "memberships": len(mapped.memberships),
+        "sites": len(mapped.sites),
+        "meters": len(mapped.meters),
+        "assets": len(mapped.assets),
+        "tariffs": len(mapped.tariffs),
+        "timeseries": len(mapped.timeseries),
+        "topology_edges": len(mapped.topology_edges),
+    }
+
+
+# ---- file: celine/rec_registry/services/iri.py
+from __future__ import annotations
+
+from urllib.parse import urljoin
+
+
+def api_base(request_base: str) -> str:
+    # ensure trailing slash
+    return request_base if request_base.endswith("/") else request_base + "/"
+
+
+def community_iri(base: str, community_key: str) -> str:
+    return urljoin(api_base(base), f"communities/{community_key}")
+
+
+def entity_iri(base: str, community_key: str, collection: str, key: str) -> str:
+    return urljoin(api_base(base), f"communities/{community_key}/{collection}/{key}")
+
+
+def context_iri(base: str, version: str | None = "v1") -> str:
+    return urljoin(api_base(base), f"contexts/celine/{version}")
+
+
+# ---- file: celine/rec_registry/services/jsonld.py
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from celine.rec_registry.models import (
+    Asset,
+    Community,
+    Membership,
+    Meter,
+    Participant,
+    Site,
+    Tariff,
+    TimeSeries,
+    TopologyEdge,
+)
+from celine.rec_registry.services.iri import community_iri, context_iri, entity_iri
+
+
+def _to_float(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    if isinstance(v, Decimal):
+        return float(v)
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+# JSON-LD type aliases (mapped in @context)
+TYPE_COMMUNITY = "Community"
+TYPE_PARTICIPANT = "Participant"
+TYPE_MEMBERSHIP = "Membership"
+TYPE_SITE = "Site"
+TYPE_METER = "Meter"
+TYPE_ASSET = "Asset"
+TYPE_TARIFF = "Tariff"
+TYPE_TIMESERIES = "TimeSeries"
+TYPE_EDGE = "TopologyEdge"
+
+
+def serialize_community(
+    base_url: str, c: Community, include_context: bool, version: str | None = None
+) -> Dict[str, Any]:
+    obj: Dict[str, Any] = {
+        "@id": community_iri(base_url, c.key),
+        "@type": TYPE_COMMUNITY,
+        "name": c.name,
+    }
+    if include_context:
+        obj["@context"] = context_iri(base_url, version)
+    if c.description:
+        obj["description"] = c.description
+    if c.external_id:
+        obj["external_id"] = c.external_id
+    return obj
+
+
+def serialize_participant(
+    base_url: str, community_key: str, p: Participant
+) -> Dict[str, Any]:
+    return {
+        "@id": entity_iri(base_url, community_key, "participants", p.key),
+        "@type": TYPE_PARTICIPANT,
+        "name": p.name,
+        "kind": p.kind,
+        "external_id": p.external_id,
+        "email": p.email,
+    }
+
+
+def serialize_membership(
+    base_url: str, community_key: str, m: Membership, participant_key: str
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "@id": entity_iri(base_url, community_key, "memberships", str(m.id)),
+        "@type": TYPE_MEMBERSHIP,
+        "participant": entity_iri(
+            base_url, community_key, "participants", participant_key
+        ),
+        "role": m.role,
+    }
+    if m.valid_from:
+        out["validFrom"] = m.valid_from.isoformat()
+    if m.valid_to:
+        out["validTo"] = m.valid_to.isoformat()
+    if m.voting_weight is not None:
+        out["votingWeight"] = _to_float(m.voting_weight)
+    return out
+
+
+def serialize_site(base_url: str, community_key: str, s: Site) -> Dict[str, Any]:
+    return {
+        "@id": entity_iri(base_url, community_key, "sites", s.key),
+        "@type": TYPE_SITE,
+        "name": s.name,
+        "address": s.address,
+        "lat": s.lat,
+        "lon": s.lon,
+    }
+
+
+def serialize_meter(
+    base_url: str, community_key: str, m: Meter, site_key: Optional[str]
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "@id": entity_iri(base_url, community_key, "meters", m.key),
+        "@type": TYPE_METER,
+        "name": m.name,
+    }
+    if m.pod_code:
+        out["podCode"] = m.pod_code
+    if site_key:
+        out["site"] = entity_iri(base_url, community_key, "sites", site_key)
+    return out
+
+
+def serialize_asset(
+    base_url: str,
+    community_key: str,
+    a: Asset,
+    site_key: Optional[str],
+    meter_key: Optional[str],
+    owner_key: Optional[str],
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "@id": entity_iri(base_url, community_key, "assets", a.key),
+        "@type": TYPE_ASSET,
+        "name": a.name,
+        "assetType": a.asset_type,
+    }
+    if site_key:
+        out["site"] = entity_iri(base_url, community_key, "sites", site_key)
+    if meter_key:
+        out["meter"] = entity_iri(base_url, community_key, "meters", meter_key)
+    if owner_key:
+        out["owner"] = entity_iri(base_url, community_key, "participants", owner_key)
+    if a.rated_power_kw is not None:
+        out["ratedPowerKw"] = _to_float(a.rated_power_kw)
+    if a.rated_energy_kwh is not None:
+        out["ratedEnergyKwh"] = _to_float(a.rated_energy_kwh)
+    return out
+
+
+def serialize_tariff(base_url: str, community_key: str, t: Tariff) -> Dict[str, Any]:
+    return {
+        "@id": entity_iri(base_url, community_key, "tariffs", t.key),
+        "@type": TYPE_TARIFF,
+        "name": t.name,
+        "currency": t.currency,
+        "notes": t.notes,
+    }
+
+
+def serialize_timeseries(
+    base_url: str, community_key: str, ts: TimeSeries, observed_iri: str
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "@id": entity_iri(base_url, community_key, "timeseries", ts.key),
+        "@type": TYPE_TIMESERIES,
+        "name": ts.name,
+        "metric": ts.metric,
+        "observedEntity": observed_iri,
+    }
+    if ts.unit:
+        out["unit"] = ts.unit
+    return out
+
+
+def serialize_edge(
+    base_url: str, community_key: str, e: TopologyEdge
+) -> Dict[str, Any]:
+    def resolve(t: str, k: str) -> str:
+        if t == "community":
+            return community_iri(base_url, community_key)
+        collection_map = {
+            "participant": "participants",
+            "membership": "memberships",
+            "site": "sites",
+            "meter": "meters",
+            "asset": "assets",
+            "tariff": "tariffs",
+            "timeseries": "timeseries",
+        }
+        col = collection_map.get(t)
+        return entity_iri(base_url, community_key, col or "entities", k)
+
+    return {
+        "@id": entity_iri(base_url, community_key, "topology/edges", str(e.id)),
+        "@type": TYPE_EDGE,
+        "from": resolve(e.src_type, e.src_key),
+        "predicate": e.predicate,
+        "to": resolve(e.dst_type, e.dst_key),
+    }
+
+
+async def build_community_graph(
+    session: AsyncSession, base_url: str, community_key: str, version: str | None = None
+) -> Dict[str, Any]:
+    # Fetch community
+    c = (
+        await session.execute(select(Community).where(Community.key == community_key))
+    ).scalar_one_or_none()
+    if c is None:
+        raise KeyError("community_not_found")
+
+    # Preload collections
+    participants = (
+        (
+            await session.execute(
+                select(Participant).where(Participant.community_id == c.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    memberships = (
+        (
+            await session.execute(
+                select(Membership).where(Membership.community_id == c.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sites = (
+        (await session.execute(select(Site).where(Site.community_id == c.id)))
+        .scalars()
+        .all()
+    )
+    meters = (
+        (await session.execute(select(Meter).where(Meter.community_id == c.id)))
+        .scalars()
+        .all()
+    )
+    assets = (
+        (await session.execute(select(Asset).where(Asset.community_id == c.id)))
+        .scalars()
+        .all()
+    )
+    tariffs = (
+        (await session.execute(select(Tariff).where(Tariff.community_id == c.id)))
+        .scalars()
+        .all()
+    )
+    timeseries = (
+        (
+            await session.execute(
+                select(TimeSeries).where(TimeSeries.community_id == c.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    edges = (
+        (
+            await session.execute(
+                select(TopologyEdge).where(TopologyEdge.community_id == c.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # maps for keys
+    participant_by_id = {str(p.id): p for p in participants}
+    site_by_id = {str(s.id): s for s in sites}
+    meter_by_id = {str(m.id): m for m in meters}
+    asset_by_id = {str(a.id): a for a in assets}
+
+    graph: List[Dict[str, Any]] = []
+
+    graph.append(
+        serialize_community(base_url, c, include_context=False, version=version)
+    )
+
+    for p in participants:
+        graph.append(serialize_participant(base_url, c.key, p))
+
+    for m in memberships:
+        p = participant_by_id.get(m.participant_id)
+        graph.append(
+            serialize_membership(
+                base_url, c.key, m, participant_key=p.key if p else "unknown"
+            )
+        )
+
+    for s in sites:
+        graph.append(serialize_site(base_url, c.key, s))
+
+    for m in meters:
+        site = site_by_id.get(m.site_id) if m.site_id else None
+        sk = site.key if site else None
+
+        graph.append(serialize_meter(base_url, c.key, m, site_key=sk))
+
+    for asset in assets:
+        site = site_by_id.get(asset.site_id) if asset.site_id else None
+        sk = site.key if site is not None else None
+
+        meter = meter_by_id.get(asset.meter_id) if asset.meter_id else None
+        mk = meter.key if meter is not None else None
+
+        owner = participant_by_id.get(asset.owner_id) if asset.owner_id else None
+        ok = owner.key if owner is not None else None
+
+        graph.append(
+            serialize_asset(
+                base_url, c.key, asset, site_key=sk, meter_key=mk, owner_key=ok
+            )
+        )
+
+    for t in tariffs:
+        graph.append(serialize_tariff(base_url, c.key, t))
+
+    for ts in timeseries:
+        if ts.observed_entity_kind == "community":
+            observed_iri = community_iri(base_url, c.key)
+        else:
+
+            asset = (
+                asset_by_id.get(ts.observed_asset_id) if ts.observed_asset_id else None
+            )
+
+            observed_iri = (
+                entity_iri(base_url, c.key, "assets", asset.key)
+                if asset
+                else community_iri(base_url, c.key)
+            )
+        graph.append(
+            serialize_timeseries(base_url, c.key, ts, observed_iri=observed_iri)
+        )
+
+    for e in edges:
+        graph.append(serialize_edge(base_url, c.key, e))
+
+    return {
+        "@context": context_iri(base_url, version),
+        "@graph": graph,
+    }
+
+
+# ---- file: celine/rec_registry/services/yaml_mapping.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from celine.rec_registry.schemas.import_yaml import CommunityImportDoc
+
+from celine.rec_registry.models import (
+    Asset,
+    Community,
+    Membership,
+    Meter,
+    Participant,
+    Site,
+    Tariff,
+    TimeSeries,
+    TopologyEdge,
+)
+
+
+@dataclass
+class MappedCommunity:
+    community_key: str
+    community: Community
+    participants: list[Participant]
+    memberships: list[Membership]
+    sites: list[Site]
+    meters: list[Meter]
+    assets: list[Asset]
+    tariffs: list[Tariff]
+    timeseries: list[TimeSeries]
+    topology_edges: list[TopologyEdge]
+
+
+def map_yaml_to_orm(doc: CommunityImportDoc):
+    """Map an ergonomic YAML document into ORM instances.
+
+    This is the *single* adaptation point for YAML structure changes.
+    """
+
+    community = Community(
+        key=doc.community.key,
+        name=doc.community.name,
+        description=doc.community.description,
+        external_id=doc.community.external_id,
+    )
+
+    # Build lookup maps
+    participant_by_key: dict[str, Participant] = {}
+    site_by_key: dict[str, Site] = {}
+    meter_by_key: dict[str, Meter] = {}
+
+    participants: list[Participant] = []
+    for p in doc.participants:
+        email = None
+        if isinstance(p.contacts, dict):
+            email = p.contacts.get("email")
+
+        participant = Participant(
+            key=p.key,
+            name=p.name,
+            kind=p.kind,
+            external_id=p.external_id,
+            email=email,
+            community=community,
+        )
+        participants.append(participant)
+        participant_by_key[p.key] = participant
+
+    sites: list[Site] = []
+    for s in doc.sites:
+        lat = s.geo.lat if s.geo else None
+        lon = s.geo.lon if s.geo else None
+        site = Site(
+            key=s.key,
+            name=s.name,
+            address=s.address,
+            lat=lat,
+            lon=lon,
+            community=community,
+        )
+        sites.append(site)
+        site_by_key[s.key] = site
+
+    meters: list[Meter] = []
+    for m in doc.meters:
+        meter = Meter(key=m.key, name=m.name, pod_code=m.pod_code, community=community)
+        if m.site:
+            if m.site not in site_by_key:
+                raise ValueError(f"Meter '{m.key}' references unknown site '{m.site}'")
+            meter.site = site_by_key[m.site]
+        meters.append(meter)
+        meter_by_key[m.key] = meter
+
+    assets: list[Asset] = []
+    for a in doc.assets:
+        asset = Asset(
+            key=a.key,
+            name=a.name,
+            asset_type=a.type,
+            rated_power_kw=a.rated_power_kw,
+            rated_energy_kwh=a.rated_energy_kwh,
+            community=community,
+        )
+        if a.site:
+            if a.site not in site_by_key:
+                raise ValueError(f"Asset '{a.key}' references unknown site '{a.site}'")
+            asset.site = site_by_key[a.site]
+        if a.meter:
+            if a.meter not in meter_by_key:
+                raise ValueError(
+                    f"Asset '{a.key}' references unknown meter '{a.meter}'"
+                )
+            asset.meter = meter_by_key[a.meter]
+        if a.owner:
+            if a.owner not in participant_by_key:
+                raise ValueError(
+                    f"Asset '{a.key}' references unknown owner '{a.owner}'"
+                )
+            asset.owner = participant_by_key[a.owner]
+        assets.append(asset)
+
+    tariffs: list[Tariff] = []
+    for t in doc.tariffs:
+        tariffs.append(
+            Tariff(
+                key=t.key,
+                name=t.name,
+                currency=t.currency,
+                notes=t.notes,
+                community=community,
+            )
+        )
+
+    def _parse_dt(value: str | datetime | None):
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc)
+        # Accept RFC3339-like strings (e.g. 2025-01-01T00:00:00Z)
+        v = value.strip()
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        return datetime.fromisoformat(v).astimezone(timezone.utc)
+
+    memberships: list[Membership] = []
+    for m in doc.memberships:
+        if m.participant not in participant_by_key:
+            raise ValueError(
+                f"Membership references unknown participant '{m.participant}'"
+            )
+        memberships.append(
+            Membership(
+                participant=participant_by_key[m.participant],
+                role=m.role,
+                valid_from=_parse_dt(m.valid_from),
+                valid_to=_parse_dt(m.valid_to),
+                voting_weight=m.voting_weight,
+                community=community,
+            )
+        )
+
+    timeseries: list[TimeSeries] = []
+    for ts in doc.timeseries:
+        t = TimeSeries(
+            key=ts.key,
+            name=ts.name,
+            metric=ts.metric,
+            unit=ts.unit,
+            observed_entity_kind=(
+                "community" if ts.observed_entity == doc.community.key else "asset"
+            ),
+            community=community,
+        )
+        if t.observed_entity_kind == "asset":
+            # observed_entity is an asset key
+            asset_lookup = {a.key: a for a in assets}
+            if ts.observed_entity not in asset_lookup:
+                raise ValueError(
+                    f"TimeSeries '{ts.key}' references unknown asset '{ts.observed_entity}'"
+                )
+            t.observed_entity = asset_lookup[ts.observed_entity]
+        timeseries.append(t)
+
+    edges: list[TopologyEdge] = []
+    if doc.topology and doc.topology.edges:
+        known_keys = {doc.community.key: "community"}
+        known_keys.update({p.key: "participant" for p in participants})
+        known_keys.update({s.key: "site" for s in sites})
+        known_keys.update({m.key: "meter" for m in meters})
+        known_keys.update({a.key: "asset" for a in assets})
+        known_keys.update({t.key: "tariff" for t in tariffs})
+        known_keys.update({ts.key: "timeseries" for ts in timeseries})
+
+        for e in doc.topology.edges:
+            src_key = e.from_
+            dst_key = e.to
+            if src_key not in known_keys:
+                raise ValueError(f"Topology edge references unknown from '{src_key}'")
+            if dst_key not in known_keys:
+                raise ValueError(f"Topology edge references unknown to '{dst_key}'")
+            edges.append(
+                TopologyEdge(
+                    src_key=src_key,
+                    src_type=known_keys[src_key],
+                    predicate=e.predicate,
+                    dst_key=dst_key,
+                    dst_type=known_keys[dst_key],
+                    community=community
+                )
+            )
+
+    return MappedCommunity(
+        community_key=doc.community.key,
+        community=community,
+        participants=participants,
+        memberships=memberships,
+        sites=sites,
+        meters=meters,
+        assets=assets,
+        tariffs=tariffs,
+        timeseries=timeseries,
+        topology_edges=edges,
+    )
+
+
+# ---- file: pyproject.toml
+[project]
+name = "celine-rec-registry"
+version = "0.1.0"
+description = "CELINE REC Registry microservice (read-only JSON-LD API)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "CELINE"}]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "sqlalchemy>=2.0",
+  "asyncpg>=0.29",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "typer>=0.12",
+  "pyyaml>=6.0",
+  "python-dotenv>=1.0",
+]
+
+[project.scripts]
+celine-rec-registry = "celine.rec_registry.cli.main:app"
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["celine*"]
+
+[tool.setuptools.package-data]
+"celine.rec_registry.resources" = ["*.jsonld", "*.ttl", "*.md"]
+
+[dependency-groups]
+dev = [
+    "dumpster-cli>=1.3.2",
+    "python-semantic-release>=10.5.3",
+    "debugpy>=1.8.16",
+    "pytest>=8.4.2",
+]
+
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+
+build_command = """
+    uv lock --upgrade-package "$PACKAGE_NAME"
+    git add uv.lock
+    uv build
+"""
+
+branch = "main"
+changelog_file = "CHANGELOG.md"
+tag_format = "v{version}"
+commit_parser = "conventional"
+
+upload_to_release = false
+upload_to_pypi = false
+commit_version_number = false
+
+[tool.semantic_release.commit_parser_options]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "up"]
+parse_squash_commits = true
+ignore_merge_commits = true
+
+

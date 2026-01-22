@@ -1,20 +1,18 @@
-from __future__ import annotations
-
-from collections.abc import AsyncGenerator
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+from sqlalchemy.orm import DeclarativeBase
 from celine.rec_registry.core.settings import settings
 
 
-def make_async_engine():
-    return create_async_engine(settings.database_url, pool_pre_ping=True)
+class Base(DeclarativeBase):
+    pass
 
 
-engine = make_async_engine()
-AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+engine = create_async_engine(settings.database_url, future=True, pool_pre_ping=True)
+SessionLocal = async_sessionmaker(
+    bind=engine, expire_on_commit=False, class_=AsyncSession
+)
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
+async def get_session():
+    async with SessionLocal() as session:
         yield session

@@ -1,32 +1,26 @@
-# CELINE REC Registry
+# celine-registry
 
-Read-only microservice for storing and serving Renewable Energy Community (REC) registry data as **JSON-LD** documents.
+Registry API for CELINE REC composition (communities, participants, memberships, sites, assets, meters).
 
-## Key features
-- PostgreSQL persistence (SQLAlchemy + Alembic)
-- Read-only FastAPI endpoints, returning JSON-LD with actionable `@id` IRIs
-- Typer CLI to **replace** a community definition from an ergonomic YAML file (idempotent)
-- Dedicated YAML mapping function (single adaptation point when YAML structure evolves)
+## Implemented requirements
 
-## Run (dev)
+- Admin import/export:
+  - `POST /admin/import` replacement import (delete community graph and recreate).
+  - `GET /admin/export?community={key}` export YAML bundle.
+- Output format:
+  - `?format=json` (default)
+  - `?format=jsonld`
+- JSON-LD context is never embedded and always references:
+  - https://celine-eu.github.io/ontologies/celine.jsonld
+- API outputs expanded IRIs only (no CURIE output).
+- Subleaf endpoints with filters, no `?include`.
+- Middleware seam for future auth/ACL on `/admin/*` and write methods.
+
+## Dev quickstart
+
 ```bash
-uv venv
-uv pip install -e .
+export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/celine_registry"
+export BASE_URL="http://localhost:8000"
 
-export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/celine_rec_registry"
-
-# Run migrations
 alembic upgrade head
-
-# Start API
-uvicorn celine.rec_registry.main:app --reload
-```
-
-## Import a community
-```bash
-celine-rec-registry import community --file path/to/community.yaml
-```
-
-## Notes
-- This service stores *registry* information (structure/topology), not telemetry datapoints.
-- API outputs JSON-LD compliant structures referencing the API host as the base for `@id`.
+uvicorn celine_registry.main:app --reload --host 0.0.0.0 --port 8000

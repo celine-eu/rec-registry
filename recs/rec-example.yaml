@@ -1,0 +1,370 @@
+# =============================================================================
+# CELINE REC Registry Manifest (Example)
+# =============================================================================
+# This is a PUBLIC, FICTIONAL example aligned to celine.v0.3.ttl.
+#
+# Scope:
+# - Describe one Energy Community and its registry-relevant entities
+# - Provide stable identifiers and references for other services
+# - Reference datasets using DCAT v3 (Catalog -> Dataset -> Distribution)
+# - Anchor operator topology using CIM Substation (primary mandatory, secondary optional)
+# - Represent tariffs via Tariff + TariffAssignment (participant defaults and meter overrides)
+#
+# Notes:
+# - This YAML is a registry manifest, not an operational data store:
+#   do NOT embed time series datapoints, grid graphs, or tariff equations.
+# - Downstream services resolve "dataset.identifier" through a Dataset API / catalog.
+# =============================================================================
+
+version: "1.0"
+kind: "celine.rec.registry.v0.3"
+
+context:
+  # Base IRI used to mint canonical URIs when "uri" is omitted.
+  base_iri: "https://registry.example.org/rec"
+
+  # Prefixes used for CURIE-like strings in this manifest.
+  prefixes:
+    celine: "https://celine-eu.github.io/ontologies/celine#"
+    peco: "https://purl.org/peco/peco-core#"
+    saref: "https://saref.etsi.org/core/"
+    s4ener: "https://saref.etsi.org/saref4ener/"
+    sosa: "http://www.w3.org/ns/sosa/"
+    dcat: "http://www.w3.org/ns/dcat#"
+    dcterms: "http://purl.org/dc/terms/"
+    prov: "http://www.w3.org/ns/prov#"
+    cim: "http://www.iec.ch/TC57/CIM#"
+    auth: "https://auth.example.org/"
+    ds: "https://datasets.example.org/catalog/"
+
+# -----------------------------------------------------------------------------
+# DCAT CATALOGS (dcat:Catalog)
+# -----------------------------------------------------------------------------
+# A Catalog groups datasets served by a Dataset API. The registry references the
+# catalog and individual datasets; it does not replicate catalog search features.
+catalogs:
+  - key: "dataset_api_main"
+    type: "dcat:Catalog"
+    uri: "https://datasets.example.org/catalog"
+    title: "Example Dataset API - Main Catalog"
+    description: "Fictional catalog used for a public CELINE registry example."
+    datasets:
+      # Keys referencing entries in the top-level `datasets:` block.
+      - "ds_weather_obs"
+      - "ds_weather_fcst"
+      - "ds_meter_001_energy"
+      - "ds_pv_001_power"
+      - "ds_substation_constraints"
+
+# -----------------------------------------------------------------------------
+# DCAT DISTRIBUTIONS (dcat:Distribution)
+# -----------------------------------------------------------------------------
+# A Distribution is an access point for a dataset (API endpoint, download URL).
+distributions:
+  - key: "dist_weather_obs_api"
+    type: "dcat:Distribution"
+    access_url: "https://api.example.org/datasets/weather/observations"
+    media_type: "application/json"
+
+  - key: "dist_weather_fcst_api"
+    type: "dcat:Distribution"
+    access_url: "https://api.example.org/datasets/weather/forecast"
+    media_type: "application/json"
+
+  - key: "dist_meter_001_energy_api"
+    type: "dcat:Distribution"
+    access_url: "https://api.example.org/datasets/meter/meter_001/active_energy"
+    media_type: "application/json"
+
+  - key: "dist_pv_001_power_api"
+    type: "dcat:Distribution"
+    access_url: "https://api.example.org/datasets/pv/pv_001/power"
+    media_type: "application/json"
+
+  - key: "dist_substation_constraints_api"
+    type: "dcat:Distribution"
+    access_url: "https://api.example.org/datasets/topology/primary_ps_01/constraints"
+    media_type: "application/json"
+
+# -----------------------------------------------------------------------------
+# DCAT DATASETS (dcat:Dataset)
+# -----------------------------------------------------------------------------
+# `identifier` is the stable dataset ID known by the Dataset API.
+# `modeled_as` is a semantic hint (IRI), used by consumers to interpret content.
+# `purpose` is a lightweight tag used by CELINE registry for routing.
+datasets:
+  - key: "ds_weather_obs"
+    type: "dcat:Dataset"
+    identifier: "ds:timeseries/weather/aurora_valley/observations"
+    title: "Weather observations - Aurora Valley"
+    description: "Historical weather observations used for simulation and KPI evaluation."
+    modeled_as: "sosa:ObservationCollection"
+    purpose: "weather_observation"
+    distributions: ["dist_weather_obs_api"]
+
+  - key: "ds_weather_fcst"
+    type: "dcat:Dataset"
+    identifier: "ds:timeseries/weather/aurora_valley/forecast"
+    title: "Weather forecast - Aurora Valley"
+    description: "Short-term and day-ahead weather forecast."
+    modeled_as: "sosa:ObservationCollection"
+    purpose: "weather_forecast"
+    distributions: ["dist_weather_fcst_api"]
+
+  - key: "ds_meter_001_energy"
+    type: "dcat:Dataset"
+    identifier: "ds:timeseries/meter/meter_001/active_energy"
+    title: "Meter 001 - active energy"
+    description: "Active energy readings (kWh) for meter_001."
+    modeled_as: "peco:Timeseries"
+    purpose: "measurement"
+    distributions: ["dist_meter_001_energy_api"]
+
+  - key: "ds_pv_001_power"
+    type: "dcat:Dataset"
+    identifier: "ds:timeseries/pv/pv_001/power"
+    title: "PV 001 - active power"
+    description: "PV inverter active power timeseries (kW) for pv_001."
+    modeled_as: "peco:Timeseries"
+    purpose: "measurement"
+    distributions: ["dist_pv_001_power_api"]
+
+  - key: "ds_substation_constraints"
+    type: "dcat:Dataset"
+    identifier: "ds:topology/primary_ps_01/flex_constraints"
+    title: "Primary substation constraints"
+    description: "Constraint series used for flexibility/hosting-capacity calculations."
+    modeled_as: "peco:Timeseries"
+    purpose: "flex_constraints"
+    distributions: ["dist_substation_constraints_api"]
+
+# -----------------------------------------------------------------------------
+# COMMUNITY (celine:EnergyCommunity)
+# -----------------------------------------------------------------------------
+community:
+  key: "aurora_valley_rec"
+  type: "celine:EnergyCommunity"
+  uri: "https://registry.example.org/rec/communities/aurora_valley_rec"
+  name: "Aurora Valley Renewable Energy Community"
+  description: "A fictional REC used as a public example for CELINE registry manifests."
+  website: "https://example.org/aurora-valley-rec"
+  operator_participant: "p_operator_001"
+
+  # Coverage areas are registry-level descriptors (not a full GIS model).
+  areas:
+    - key: "av_north"
+      name: "Aurora Valley North"
+    - key: "av_south"
+      name: "Aurora Valley South"
+
+  # DCAT catalog references relevant for this community.
+  catalogs:
+    - "dataset_api_main"
+
+  # Community-level datasets (shared across the community).
+  datasets:
+    - "ds_weather_obs"
+    - "ds_weather_fcst"
+    - "ds_substation_constraints"
+
+# -----------------------------------------------------------------------------
+# PARTICIPANTS (celine:Participant)
+# -----------------------------------------------------------------------------
+participants:
+  - key: "p_operator_001"
+    type: "celine:Participant"
+    kind: "organization" # organization | individual | public_body | aggregator | other
+    name: "Aurora Grid Services Ltd."
+    auth_uri: "auth:clients/aurora-grid-services" # Identity anchor managed by IAM/SSO
+    contact:
+      email: "ops@auroragrid.example"
+      address: "1 Grid Avenue, Aurora City"
+
+  - key: "p_member_001"
+    type: "celine:Participant"
+    kind: "individual"
+    name: "Alex Rivers"
+    auth_uri: "auth:users/alex.rivers"
+    external_ids:
+      registry_user_id: "AV-0001"
+
+  - key: "p_member_002"
+    type: "celine:Participant"
+    kind: "individual"
+    name: "Sam Lee"
+    auth_uri: "auth:users/sam.lee"
+    external_ids:
+      registry_user_id: "AV-0002"
+
+# -----------------------------------------------------------------------------
+# MEMBERSHIPS (celine:Membership)
+# -----------------------------------------------------------------------------
+# Membership records roles and validity. Roles are explicit (do not infer from assets).
+memberships:
+  - key: "m_operator"
+    type: "celine:Membership"
+    community: "aurora_valley_rec"
+    participant: "p_operator_001"
+    role: "peco:Operator"
+    status: "active"
+    valid_from: "2025-01-01T00:00:00Z"
+
+  - key: "m_av_0001"
+    type: "celine:Membership"
+    community: "aurora_valley_rec"
+    participant: "p_member_001"
+    role: "peco:Prosumer"
+    status: "active"
+    valid_from: "2025-02-01T00:00:00Z"
+
+  - key: "m_av_0002"
+    type: "celine:Membership"
+    community: "aurora_valley_rec"
+    participant: "p_member_002"
+    role: "peco:Consumer"
+    status: "active"
+    valid_from: "2025-03-01T00:00:00Z"
+
+# -----------------------------------------------------------------------------
+# SITES (celine:Site) - optional but useful
+# -----------------------------------------------------------------------------
+sites:
+  - key: "site_alex_home"
+    type: "celine:Site"
+    name: "Alex Rivers Home"
+    area: "av_north"
+
+  - key: "site_sam_apartment"
+    type: "celine:Site"
+    name: "Sam Lee Apartment"
+    area: "av_south"
+
+# -----------------------------------------------------------------------------
+# TOPOLOGY ANCHORS (CIM Substations)
+# -----------------------------------------------------------------------------
+# Mandatory: exactly one primary substation anchor for the community.
+# Optional: secondary substations where known.
+topology:
+  substations:
+    - key: "primary_ps_01"
+      kind: "primary" # primary | secondary
+      name: "Primary Substation PS-01"
+      cim_ref:
+        mrid: "PS-MRID-0001" # CIM IdentifiedObject.mRID
+        uri: "https://topology.example.org/cim/substations/PS-MRID-0001"
+      datasets:
+        - "ds_substation_constraints"
+
+    - key: "secondary_ss_17"
+      kind: "secondary"
+      name: "Secondary Substation SS-17"
+      cim_ref:
+        mrid: "SS-MRID-0017"
+        uri: "https://topology.example.org/cim/substations/SS-MRID-0017"
+
+# -----------------------------------------------------------------------------
+# ASSETS (celine:Asset)
+# -----------------------------------------------------------------------------
+# Assets are registry pointers to SAREF devices and/or external asset service URIs.
+# Keep attributes minimal; do not embed full device descriptions here.
+assets:
+  - key: "pv_001"
+    type: "celine:Asset"
+    category: "pv" # pv | storage | evse | load | other
+    name: "PV System PV-001"
+    owner:
+      kind: "participant" # participant | community
+      ref: "p_member_001"
+    located_at: "site_alex_home"
+    nominal_power_kwp: 4.2
+    external_asset_uri: "https://assets.example.org/devices/pv_001"
+    datasets:
+      - "ds_pv_001_power"
+
+  - key: "bat_001"
+    type: "celine:Asset"
+    category: "storage"
+    name: "Battery BAT-001"
+    owner:
+      kind: "participant"
+      ref: "p_member_001"
+    located_at: "site_alex_home"
+    capacity_kwh: 7.5
+    external_asset_uri: "https://assets.example.org/devices/bat_001"
+
+# -----------------------------------------------------------------------------
+# METERS / PODs (celine:Meter)
+# -----------------------------------------------------------------------------
+meters:
+  - key: "meter_001"
+    type: "celine:Meter"
+    name: "Meter M-001"
+    owner:
+      kind: "participant"
+      ref: "p_member_001"
+    located_at: "site_alex_home"
+    pod: "IT000E012345678"
+    sensor_id: "sensor-abc-001" # used by ingestion/time-series pipelines
+    supplied_by_substation: "secondary_ss_17"
+    datasets:
+      - "ds_meter_001_energy"
+
+# -----------------------------------------------------------------------------
+# TARIFFS (celine:Tariff) + ASSIGNMENTS (celine:TariffAssignment)
+# -----------------------------------------------------------------------------
+# Tariffs are definitions; assignments bind them to participants/meters with
+# direction/component and validity. Tariff rules live in a tariff service or
+# dataset; registry stores only references.
+tariffs:
+  - key: "tariff_retail_tou_res"
+    type: "celine:Tariff"
+    name: "Retail ToU Residential"
+    # Optional PECO tariff classification hints (if you use PECO tariff vocab):
+    peco_tariff_type: "peco:Retail_tariff"
+    peco_tariff_base: "peco:Time_of_use"
+    currency: "EUR"
+    # Optional: link to a dataset that contains time-varying prices
+    # (represented as a DCAT dataset)
+    price_dataset: null
+
+  - key: "tariff_feed_in_basic"
+    type: "celine:Tariff"
+    name: "Basic Feed-in Tariff"
+    peco_tariff_type: "peco:Feed_in_tariff"
+    peco_tariff_base: "peco:Flat_rate"
+    currency: "EUR"
+    price_dataset: null
+
+tariff_assignments:
+  # Participant default consumption tariff
+  - key: "ta_alex_consumption"
+    type: "celine:TariffAssignment"
+    applies_to:
+      - "p_member_001"
+    tariff: "tariff_retail_tou_res"
+    direction: "consumption" # consumption | injection
+    component: "retail_energy" # retail_energy | network | incentive | other
+    valid_from: "2025-02-01T00:00:00Z"
+    valid_to: null
+
+  # Participant default injection tariff (prosumer)
+  - key: "ta_alex_injection"
+    type: "celine:TariffAssignment"
+    applies_to:
+      - "p_member_001"
+    tariff: "tariff_feed_in_basic"
+    direction: "injection"
+    component: "retail_energy"
+    valid_from: "2025-02-01T00:00:00Z"
+    valid_to: null
+
+  # Optional meter-level override (takes precedence over participant default)
+  - key: "ta_meter_001_consumption_override"
+    type: "celine:TariffAssignment"
+    applies_to:
+      - "meter_001"
+    tariff: "tariff_retail_tou_res"
+    direction: "consumption"
+    component: "network"
+    valid_from: "2025-06-01T00:00:00Z"
+    valid_to: null
