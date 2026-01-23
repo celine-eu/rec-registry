@@ -1,6 +1,6 @@
 [project]
 name = "celine-rec-registry"
-version = "0.1.0"
+version = "1.0.0"
 description = "CELINE REC Registry microservice (read-only JSON-LD API)"
 readme = "README.md"
 requires-python = ">=3.11"
