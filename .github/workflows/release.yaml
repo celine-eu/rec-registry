@@ -6,7 +6,8 @@ on:
 permissions:
   contents: write # Needed to upload artifacts to the release
   id-token: write # Needed for OIDC PyPI publishing
-
+  packages: write
+  attestations: write
 jobs:
   build:
     name: Build Wheel and SDist
