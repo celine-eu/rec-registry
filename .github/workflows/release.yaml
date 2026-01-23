@@ -39,3 +39,45 @@ jobs:
         ## TODO: create a trusted publisher on PyPI
         ## https://docs.pypi.org/trusted-publishers/
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine image tag(s)
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "tag=dev" >> $GITHUB_OUTPUT
+            echo "extra_tag=" >> $GITHUB_OUTPUT
+          else
+            TAG_NAME=${GITHUB_REF#refs/tags/}
+            echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+            echo "extra_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker build -t $IMAGE:${{ steps.vars.outputs.tag }} .
+          if [ -n "${{ steps.vars.outputs.extra_tag }}" ]; then
+            docker tag $IMAGE:${{ steps.vars.outputs.tag }} $IMAGE:${{ steps.vars.outputs.extra_tag }}
+          fi
+
+      - name: Push Docker image(s)
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker push $IMAGE:${{ steps.vars.outputs.tag }}
+          if [ -n "${{ steps.vars.outputs.extra_tag }}" ]; then
+            docker push $IMAGE:${{ steps.vars.outputs.extra_tag }}
+          fi
