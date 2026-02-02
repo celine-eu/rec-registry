@@ -20,12 +20,12 @@ services:
 
   api:
     command: >-
-      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload"
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8004:8004"
     depends_on:
       db:
         condition: service_healthy

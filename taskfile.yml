@@ -13,7 +13,7 @@ tasks:
   run:
     desc: Start services
     cmds:
-      - docker compose up -d
+      - docker compose up api
 
   db:reset:
     deps: [run]
