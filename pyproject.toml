@@ -30,8 +30,8 @@ package = true
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["celine*"]
+where = ["src"]
+include = ["celine.rec_registry*"]
 
 [tool.setuptools.package-data]
 "celine.rec_registry.resources" = ["*.jsonld", "*.ttl", "*.md"]

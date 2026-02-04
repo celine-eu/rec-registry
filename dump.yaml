@@ -6,6 +6,6 @@ extensions:
   - .yaml
   - .txt
 contents:
-  - celine
+  - src
   - alembic
   - pyproject.toml
