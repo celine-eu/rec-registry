@@ -4,8 +4,10 @@ extensions:
   - .py
   - .md
   - .yaml
-  - .txt
+  - .json
+  - .toml
 contents:
   - src
   - alembic
+  - schemas
   - pyproject.toml

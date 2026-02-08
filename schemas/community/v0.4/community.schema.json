@@ -1,0 +1,565 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://celine-eu.github.io/projects/rec-registry/schemas/community/v0.4/community.schema.json",
+  "title": "REC Registry Schema",
+  "description": "Schema for Renewable Energy Community (REC) registry structure",
+  "version": "0.4",
+  "type": "object",
+  "required": [
+    "version",
+    "schema_version",
+    "community",
+    "members"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Registry format version"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version this registry conforms to"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "created": {
+          "type": "string",
+          "format": "date",
+          "description": "Registry creation date (YYYY-MM-DD)"
+        },
+        "updated": {
+          "type": "string",
+          "format": "date",
+          "description": "Last update date (YYYY-MM-DD)"
+        },
+        "updated_by": {
+          "type": "string",
+          "description": "Who/what updated the registry last"
+        },
+        "description": {
+          "type": "string",
+          "description": "Registry description"
+        }
+      }
+    },
+    "community": {
+      "$ref": "#/definitions/Community"
+    },
+    "members": {
+      "type": "object",
+      "description": "Community members indexed by member ID",
+      "additionalProperties": {
+        "$ref": "#/definitions/Member"
+      }
+    }
+  },
+  "definitions": {
+    "Community": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "areas"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Unique community identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable community name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Community description"
+        },
+        "areas": {
+          "type": "object",
+          "description": "Geographic areas within the community",
+          "additionalProperties": {
+            "$ref": "#/definitions/Area"
+          },
+          "minProperties": 1
+        },
+        "assets": {
+          "$ref": "#/definitions/AssetCollection",
+          "description": "Community-owned assets"
+        }
+      }
+    },
+    "Area": {
+      "type": "object",
+      "required": [
+        "name",
+        "location"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Area name"
+        },
+        "location": {
+          "type": "object",
+          "required": [
+            "lat",
+            "lon"
+          ],
+          "properties": {
+            "lat": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90,
+              "description": "Latitude"
+            },
+            "lon": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "description": "Longitude"
+            }
+          }
+        }
+      }
+    },
+    "Member": {
+      "type": "object",
+      "required": [
+        "user_id",
+        "name",
+        "role",
+        "area",
+        "status"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "description": "External user system identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Member name"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "consumer",
+            "prosumer",
+            "producer",
+            "operator",
+            "admin"
+          ],
+          "description": "Member role in the community"
+        },
+        "area": {
+          "type": "string",
+          "description": "Reference to community area"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "suspended",
+            "inactive"
+          ],
+          "description": "Membership status"
+        },
+        "assets": {
+          "$ref": "#/definitions/AssetCollection",
+          "description": "Member-owned assets"
+        }
+      }
+    },
+    "AssetCollection": {
+      "type": "object",
+      "description": "Collection of assets organized by type",
+      "properties": {
+        "pv": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/PVAsset"
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/StorageAsset"
+          }
+        },
+        "meter": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/MeterAsset"
+          }
+        },
+        "ev_charger": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/EVChargerAsset"
+          }
+        },
+        "heat_pump": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/HeatPumpAsset"
+          }
+        },
+        "load": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/LoadAsset"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PVAsset": {
+      "type": "object",
+      "required": [
+        "name",
+        "rated_power"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Asset name"
+        },
+        "rated_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Nominal peak power output (kW)"
+        },
+        "panel_type": {
+          "type": "string",
+          "enum": [
+            "monocrystalline",
+            "polycrystalline",
+            "thin_film"
+          ]
+        },
+        "inverter_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum inverter output power (kW)"
+        },
+        "orientation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360,
+          "description": "Azimuth angle in degrees (0=North, 90=East, 180=South, 270=West)"
+        },
+        "tilt_angle": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 90,
+          "description": "Panel tilt from horizontal (degrees)"
+        },
+        "installation_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Installation date (YYYY-MM-DD)"
+        },
+        "location": {
+          "type": "string",
+          "description": "Area reference or specific coordinates"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "StorageAsset": {
+      "type": "object",
+      "required": [
+        "name",
+        "capacity",
+        "max_charge_power",
+        "max_discharge_power"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "capacity": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total energy storage capacity (kWh)"
+        },
+        "max_charge_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum charging power (kW)"
+        },
+        "max_discharge_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum discharging power (kW)"
+        },
+        "battery_type": {
+          "type": "string",
+          "enum": [
+            "lithium_ion",
+            "lead_acid",
+            "flow_battery",
+            "sodium_ion",
+            "other"
+          ]
+        },
+        "round_trip_efficiency": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Round-trip efficiency percentage"
+        },
+        "installation_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "location": {
+          "type": "string"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "MeterAsset": {
+      "type": "object",
+      "required": [
+        "name",
+        "sensor_id",
+        "meter_type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "sensor_id": {
+          "type": "string",
+          "description": "Physical device identifier (must be globally unique)"
+        },
+        "meter_type": {
+          "type": "string",
+          "enum": [
+            "consumption",
+            "production",
+            "bidirectional",
+            "import",
+            "export"
+          ],
+          "description": "Type of energy flow measured"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "modbus",
+            "mqtt",
+            "rest_api",
+            "m-bus",
+            "dlms",
+            "other"
+          ],
+          "description": "Communication protocol"
+        },
+        "installation_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "EVChargerAsset": {
+      "type": "object",
+      "required": [
+        "name",
+        "max_power",
+        "charger_type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "max_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum charging power (kW)"
+        },
+        "charger_type": {
+          "type": "string",
+          "enum": [
+            "ac_level1",
+            "ac_level2",
+            "dc_fast",
+            "dc_ultra_fast"
+          ]
+        },
+        "connector_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "type1",
+              "type2",
+              "ccs",
+              "chademo",
+              "tesla"
+            ]
+          },
+          "description": "Available connector types"
+        },
+        "smart_charging": {
+          "type": "boolean",
+          "description": "Supports smart/controlled charging"
+        },
+        "bidirectional": {
+          "type": "boolean",
+          "description": "Supports vehicle-to-grid (V2G)"
+        },
+        "installation_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "location": {
+          "type": "string"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "HeatPumpAsset": {
+      "type": "object",
+      "required": [
+        "name",
+        "thermal_power"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "thermal_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Nominal heating/cooling power (kW)"
+        },
+        "electrical_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Nominal electrical power consumption (kW)"
+        },
+        "cop": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Coefficient of Performance (heating mode)"
+        },
+        "eer": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Energy Efficiency Ratio (cooling mode)"
+        },
+        "heat_pump_type": {
+          "type": "string",
+          "enum": [
+            "air_to_air",
+            "air_to_water",
+            "ground_source",
+            "water_source"
+          ]
+        },
+        "reversible": {
+          "type": "boolean",
+          "description": "Can provide both heating and cooling"
+        },
+        "installation_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "location": {
+          "type": "string"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "LoadAsset": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "load_type": {
+          "type": "string",
+          "enum": [
+            "hvac",
+            "lighting",
+            "appliance",
+            "industrial",
+            "other"
+          ]
+        },
+        "rated_power": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Nominal power consumption (kW)"
+        },
+        "controllable": {
+          "type": "boolean",
+          "description": "Can be controlled for demand response"
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Load priority for curtailment"
+        },
+        "location": {
+          "type": "string"
+        },
+        "relationships": {
+          "$ref": "#/definitions/AssetRelationships"
+        }
+      }
+    },
+    "AssetRelationships": {
+      "type": "object",
+      "description": "Relationships to other assets (unidirectional)",
+      "properties": {
+        "measures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "description": "Asset IDs that this asset measures or is measured by"
+        },
+        "paired_with": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Asset ID this asset is paired with (e.g., PV paired with storage)"
+        }
+      }
+    }
+  }
+}

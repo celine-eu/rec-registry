@@ -1,3 +1,14 @@
+"""
+CELINE REC Registry CLI.
+
+Commands:
+- import: Import a v0.4 YAML bundle (idempotent)
+- export: Export a community to v0.4 YAML
+- list: List communities
+- tree: Show community structure
+- lookup: Lookup by user_id or sensor_id
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,16 +18,22 @@ import httpx
 import typer
 import yaml
 
-app = typer.Typer(name="celine-registry", no_args_is_help=True)
+from celine.rec_registry.core.settings import settings
+
+app = typer.Typer(name="celine-rec-registry", no_args_is_help=True)
 
 
 def _api_url(base: str, path: str) -> str:
+    """Construct API URL."""
     return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _get_json(
-    client: httpx.Client, url: str, params: dict[str, Any] | None = None
+    client: httpx.Client,
+    url: str,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """GET request returning JSON."""
     r = client.get(url, params=params)
     if r.status_code >= 400:
         raise typer.BadParameter(f"GET {url} failed [{r.status_code}]: {r.text}")
@@ -24,6 +41,11 @@ def _get_json(
     if not isinstance(data, dict):
         raise typer.BadParameter(f"GET {url} returned non-object JSON")
     return data
+
+
+# =============================================================================
+# Import Command
+# =============================================================================
 
 
 @app.command("import")
@@ -34,19 +56,38 @@ def import_bundle(
         "-f",
         exists=True,
         readable=True,
-        help="Greenland YAML bundle file",
+        help="YAML bundle file",
     ),
     api: str = typer.Option(
-        "http://localhost:8000", "--api", help="Registry API base URL"
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Validate without writing"),
-    timeout: float = typer.Option(60.0, "--timeout", help="HTTP timeout seconds"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate without writing to database",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
 ):
     """
-    Import a Greenland-style YAML bundle via /admin/import (JSON payload: bundle + dry_run).
+    Import a YAML bundle (idempotent replacement import).
+
+    Deletes existing community and recreates it from the bundle.
+    Use --dry-run to validate without making changes.
     """
     yaml_text = file.read_text(encoding="utf-8")
-    bundle = yaml.safe_load(yaml_text) or {}
+
+    try:
+        bundle = yaml.safe_load(yaml_text) or {}
+    except yaml.YAMLError as e:
+        typer.secho(f"Invalid YAML: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
     if not isinstance(bundle, dict):
         typer.secho(
             "Top-level YAML must be a mapping/object", fg=typer.colors.RED, err=True
@@ -64,28 +105,120 @@ def import_bundle(
 
     if r.status_code >= 400:
         typer.secho(
-            f"Import failed [{r.status_code}]:\n{r.text}", fg=typer.colors.RED, err=True
+            f"Import failed [{r.status_code}]:\n{r.text}",
+            fg=typer.colors.RED,
+            err=True,
         )
         raise typer.Exit(1)
 
     report = r.json()
-    typer.secho("Import completed", fg=typer.colors.GREEN)
-    typer.echo(report)
+
+    if dry_run:
+        typer.secho("Dry run completed (no changes made)", fg=typer.colors.YELLOW)
+    else:
+        typer.secho("Import completed successfully", fg=typer.colors.GREEN)
+
+    typer.echo(f"Community: {report.get('community_key')}")
+    typer.echo(f"Deleted: {report.get('deleted')}")
+    typer.echo(f"Inserted: {report.get('inserted')}")
+
+    warnings = report.get("warnings", [])
+    if warnings:
+        typer.secho(f"\nWarnings ({len(warnings)}):", fg=typer.colors.YELLOW)
+        for w in warnings:
+            typer.echo(f"  - {w}")
+
+
+# =============================================================================
+# Export Command
+# =============================================================================
+
+
+@app.command("export")
+def export_bundle(
+    community: str = typer.Option(
+        ...,
+        "--community",
+        "-c",
+        help="Community key to export",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output file (default: stdout)",
+    ),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+):
+    """
+    Export a community to v0.4 YAML format.
+    """
+    url = _api_url(api, "/admin/export")
+
+    try:
+        r = httpx.get(url, params={"community": community}, timeout=timeout)
+    except httpx.HTTPError as exc:
+        typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if r.status_code >= 400:
+        typer.secho(
+            f"Export failed [{r.status_code}]: {r.text}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    yaml_text = r.text
+
+    if output:
+        output.write_text(yaml_text, encoding="utf-8")
+        typer.secho(f"Exported to {output}", fg=typer.colors.GREEN)
+    else:
+        typer.echo(yaml_text)
+
+
+# =============================================================================
+# List Command
+# =============================================================================
 
 
 @app.command("list")
 def list_communities(
     api: str = typer.Option(
-        "http://localhost:8000", "--api", help="Registry API base URL"
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
     ),
     key: str | None = typer.Option(
-        None, "--key", help="Filter by community key (exact match)"
+        None,
+        "--key",
+        help="Filter by community key",
     ),
-    limit: int = typer.Option(200, "--limit", min=1, max=500, help="Page size"),
-    timeout: float = typer.Option(30.0, "--timeout", help="HTTP timeout seconds"),
+    limit: int = typer.Option(
+        200,
+        "--limit",
+        min=1,
+        max=500,
+        help="Maximum number of results",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
 ):
     """
-    List communities from GET /communities.
+    List communities.
     """
     url = _api_url(api, "/communities")
     params: dict[str, Any] = {"limit": limit}
@@ -100,157 +233,208 @@ def list_communities(
         typer.echo("No communities found.")
         raise typer.Exit(0)
 
-    # Simple, stable output
     for c in sorted(items, key=lambda x: x.get("key", "")):
         typer.echo(f"- {c.get('key')}  {c.get('name') or ''}".rstrip())
 
 
-def _group_assets_by_owner(
-    assets: list[dict[str, Any]],
-) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = {}
-    for a in assets:
-        owner = a.get("owner") or "UNKNOWN_OWNER"
-        out.setdefault(owner, []).append(a)
-    return out
-
-
-def _group_meters_by_owner(
-    meters: list[dict[str, Any]],
-) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = {}
-    for m in meters:
-        owner = m.get("owner") or "UNKNOWN_OWNER"
-        out.setdefault(owner, []).append(m)
-    return out
+# =============================================================================
+# Tree Command
+# =============================================================================
 
 
 @app.command("tree")
 def community_tree(
-    community: str = typer.Option(..., "--community", "-c", help="Community key"),
-    api: str = typer.Option(
-        "http://localhost:8000", "--api", help="Registry API base URL"
+    community: str = typer.Option(
+        ...,
+        "--community",
+        "-c",
+        help="Community key",
     ),
-    timeout: float = typer.Option(30.0, "--timeout", help="HTTP timeout seconds"),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
     max_items: int = typer.Option(
-        500, "--max-items", min=1, max=5000, help="Max items per subleaf fetch"
+        500,
+        "--max-items",
+        min=1,
+        max=5000,
+        help="Maximum items per fetch",
     ),
 ):
     """
-    Show a simplified community tree (community -> participants -> meters/assets).
-    Pulls subleafs using minimal queries (no ?include).
+    Show community structure tree.
     """
     with httpx.Client(timeout=timeout) as client:
+        # Fetch community
         c = _get_json(client, _api_url(api, f"/communities/{community}"))
-        participants = _get_json(
+
+        # Fetch members
+        members = _get_json(
             client,
-            _api_url(api, f"/communities/{community}/participants"),
+            _api_url(api, f"/communities/{community}/members"),
             params={"limit": max_items},
         ).get("items", [])
-        memberships = _get_json(
-            client,
-            _api_url(api, f"/communities/{community}/memberships"),
-            params={"limit": max_items},
-        ).get("items", [])
-        sites = _get_json(
-            client,
-            _api_url(api, f"/communities/{community}/sites"),
-            params={"limit": max_items},
-        ).get("items", [])
+
+        # Fetch assets
         assets = _get_json(
             client,
             _api_url(api, f"/communities/{community}/assets"),
             params={"limit": max_items},
         ).get("items", [])
-        meters = _get_json(
-            client,
-            _api_url(api, f"/communities/{community}/meters"),
-            params={"limit": max_items},
-        ).get("items", [])
 
-    # Indexes
-    participant_by_iri = {p.get("iri"): p for p in participants if p.get("iri")}
-    participant_by_key = {p.get("key"): p for p in participants if p.get("key")}
-    site_by_iri = {s.get("iri"): s for s in sites if s.get("iri")}
-    site_by_key = {s.get("key"): s for s in sites if s.get("key")}
+    # Index assets by owner
+    assets_by_owner: dict[str, list[dict]] = {}
+    for a in assets:
+        owner_key = a.get("owner_key", "UNKNOWN")
+        assets_by_owner.setdefault(owner_key, []).append(a)
 
-    assets_by_owner = _group_assets_by_owner(assets)
-    meters_by_owner = _group_meters_by_owner(meters)
-
-    # Community header
+    # Print tree
     typer.echo(f"{c.get('key')}  {c.get('name') or ''}".rstrip())
-    typer.echo(f"  iri: {c.get('iri')}")
+    typer.echo(f"  description: {c.get('description') or '-'}")
 
-    typer.echo(f"  participants: {len(participants)}")
-    typer.echo(f"  memberships: {len(memberships)}")
-    typer.echo(f"  sites: {len(sites)}")
+    # Areas
+    areas = c.get("areas", {})
+    if areas:
+        typer.echo(f"  areas ({len(areas)}):")
+        for area_key, area_data in sorted(areas.items()):
+            area_name = (
+                area_data.get("name", area_key)
+                if isinstance(area_data, dict)
+                else area_key
+            )
+            typer.echo(f"    - {area_key}: {area_name}")
+
+    # Summary
+    typer.echo(f"  members: {len(members)}")
     typer.echo(f"  assets: {len(assets)}")
-    typer.echo(f"  meters: {len(meters)}")
 
-    # Sites (compact)
-    if sites:
-        typer.echo("  sites:")
-        for s in sorted(sites, key=lambda x: x.get("key", "")):
-            label = s.get("name") or s.get("area") or ""
-            typer.echo(f"    - {s.get('key')} {label}".rstrip())
+    # Members with their assets
+    typer.echo("  members:")
+    for m in sorted(members, key=lambda x: x.get("key", "")):
+        m_key = m.get("key")
+        m_name = m.get("name", "")
+        m_role = m.get("role", "")
+        m_user_id = m.get("user_id", "")
 
-    # Participants with their memberships + meters/assets counts
-    if participants:
-        typer.echo("  participants:")
-        # membership map by participant iri
-        roles_by_participant: dict[str, list[str]] = {}
-        for m in memberships:
-            p_iri = m.get("participant")
-            role = m.get("role_iri") or ""
-            if p_iri:
-                roles_by_participant.setdefault(p_iri, []).append(role)
+        member_assets = assets_by_owner.get(m_key, [])
 
-        for p in sorted(participants, key=lambda x: x.get("key", "")):
-            p_key = p.get("key")
-            p_iri = p.get("iri")
-            p_name = p.get("name") or ""
-            p_kind = p.get("kind") or ""
+        header = f"    - {m_key}"
+        if m_name:
+            header += f" ({m_name})"
+        header += f" [{m_role}]"
+        header += f"  user_id={m_user_id}"
+        header += f"  assets={len(member_assets)}"
+        typer.echo(header)
 
-            # Owner field in assets/meters is expected to be an IRI in API output.
-            a_list = assets_by_owner.get(p_iri, [])
-            m_list = meters_by_owner.get(p_iri, [])
+        # Group assets by type
+        by_type: dict[str, list[dict]] = {}
+        for a in member_assets:
+            by_type.setdefault(a.get("asset_type", "unknown"), []).append(a)
 
-            roles = roles_by_participant.get(p_iri, [])
-            roles_s = ", ".join(sorted(set([r for r in roles if r]))) if roles else ""
-
-            header = f"    - {p_key}"
-            if p_name:
-                header += f" {p_name}"
-            if p_kind:
-                header += f" [{p_kind}]"
-            if roles_s:
-                header += f" roles: {roles_s}"
-            header += f"  assets={len(a_list)} meters={len(m_list)}"
-            typer.echo(header)
-
-            # Meters (simplified)
-            for mm in sorted(m_list, key=lambda x: x.get("key", "")):
-                site_label = ""
-                site_ref = mm.get("site")
-                if site_ref:
-                    s = site_by_iri.get(site_ref) or site_by_key.get(site_ref)
-                    site_label = f" @ {s.get('key')}" if s and s.get("key") else ""
-                sensor = mm.get("sensor_id") or ""
+        for asset_type, type_assets in sorted(by_type.items()):
+            for a in sorted(type_assets, key=lambda x: x.get("key", "")):
+                sensor = f" sensor={a.get('sensor_id')}" if a.get("sensor_id") else ""
                 typer.echo(
-                    f"        meter {mm.get('key')}{site_label} sensor={sensor}".rstrip()
+                    f"        {asset_type}: {a.get('key')} {a.get('name', '')}{sensor}".rstrip()
                 )
 
-            # Assets (simplified)
-            for aa in sorted(a_list, key=lambda x: x.get("key", "")):
-                site_label = ""
-                site_ref = aa.get("site")
-                if site_ref:
-                    s = site_by_iri.get(site_ref) or site_by_key.get(site_ref)
-                    site_label = f" @ {s.get('key')}" if s and s.get("key") else ""
-                cat = aa.get("category_iri") or ""
-                typer.echo(
-                    f"        asset {aa.get('key')}{site_label} category={cat}".rstrip()
-                )
+
+# =============================================================================
+# Lookup Commands
+# =============================================================================
+
+
+@app.command("lookup-user")
+def lookup_user(
+    user_id: str = typer.Argument(..., help="User ID to lookup"),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+):
+    """
+    Lookup a member by user_id across all communities.
+    """
+    url = _api_url(api, f"/lookup/member-by-user-id/{user_id}")
+
+    try:
+        r = httpx.get(url, timeout=timeout)
+    except httpx.HTTPError as exc:
+        typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if r.status_code == 404:
+        typer.secho("User not found", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+
+    if r.status_code >= 400:
+        typer.secho(
+            f"Lookup failed [{r.status_code}]: {r.text}", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(1)
+
+    data = r.json()
+    typer.echo(f"Community: {data.get('community_key')} ({data.get('community_name')})")
+    typer.echo(f"Member: {data.get('key')} ({data.get('name')})")
+    typer.echo(f"User ID: {data.get('user_id')}")
+    typer.echo(f"Role: {data.get('role')}")
+    typer.echo(f"Status: {data.get('status')}")
+
+
+@app.command("lookup-sensor")
+def lookup_sensor(
+    sensor_id: str = typer.Argument(..., help="Sensor ID to lookup"),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+):
+    """
+    Lookup a meter by sensor_id across all communities.
+    """
+    url = _api_url(api, f"/lookup/asset-by-sensor-id/{sensor_id}")
+
+    try:
+        r = httpx.get(url, timeout=timeout)
+    except httpx.HTTPError as exc:
+        typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if r.status_code == 404:
+        typer.secho("Sensor not found", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+
+    if r.status_code >= 400:
+        typer.secho(
+            f"Lookup failed [{r.status_code}]: {r.text}", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(1)
+
+    data = r.json()
+    typer.echo(f"Community: {data.get('community_key')} ({data.get('community_name')})")
+    typer.echo(f"Owner: {data.get('owner_key')} (user_id: {data.get('owner_user_id')})")
+    typer.echo(f"Asset: {data.get('key')} ({data.get('name')})")
+    typer.echo(f"Type: {data.get('asset_type')}")
+    typer.echo(f"Sensor ID: {data.get('sensor_id')}")
 
 
 def main() -> None:

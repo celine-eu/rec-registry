@@ -3,7 +3,7 @@ name = "celine-rec-registry"
 version = "1.0.0"
 description = "CELINE REC Registry microservice (read-only JSON-LD API)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{name = "CELINE"}]
 dependencies = [
   "fastapi>=0.110",
@@ -18,6 +18,7 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.0",
   "httpx>=0.28.1",
+  "celine-sdk>=1.0.1",
 ]
 
 [project.scripts]

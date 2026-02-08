@@ -1,9 +1,18 @@
-# celine_registry/models.py
+"""
+CELINE REC Registry - Database Models (v0.4 Schema)
+
+Simplified flat model:
+- Community: REC community with embedded areas
+- Member: Community member with role, status, area reference
+- Asset: All asset types (pv, storage, meter, ev_charger, heat_pump, load) in one table
+"""
+
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import String, ForeignKey, UniqueConstraint, Index, Text
+from sqlalchemy import String, ForeignKey, UniqueConstraint, Index, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,36 +20,47 @@ from celine.rec_registry.db.session import Base
 
 
 class Community(Base):
+    """
+    Renewable Energy Community.
+    
+    Areas are stored as embedded JSONB:
+    {
+        "area_north": {"name": "North Area", "location": {"lat": 45.0, "lon": 11.0}},
+        ...
+    }
+    """
     __tablename__ = "community"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
 
-    # Stable external identifier
+    # Stable key identifier (e.g., "my_rec")
     key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
 
-    # Expanded, absolute IRI (actionable API IRI or explicit IRI from YAML)
-    iri: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-
-    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Forward-compatible extension fields
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Embedded areas as JSONB
+    areas: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
 
-    # Community-scoped dependents: replacement import deletes these by deleting Community
-    participants: Mapped[list["Participant"]] = relationship(
-        back_populates="community",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
+    # Extension fields for future use
+    extra: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
     )
-    memberships: Mapped[list["Membership"]] = relationship(
-        back_populates="community",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
     )
-    sites: Mapped[list["Site"]] = relationship(
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    members: Mapped[list["Member"]] = relationship(
         back_populates="community",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -50,211 +70,176 @@ class Community(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    meters: Mapped[list["Meter"]] = relationship(
-        back_populates="community",
+
+    __table_args__ = (
+        Index("ix_community_key", "key", unique=True),
+    )
+
+
+class Member(Base):
+    """
+    Community member (participant).
+    
+    - key: internal member key (e.g., "gl-00001")
+    - user_id: external system identifier (e.g., POD code or SSO subject)
+    - role: consumer, prosumer, producer, operator, admin
+    - status: pending, active, suspended, inactive
+    - area: reference to community area key
+    """
+    __tablename__ = "member"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    community_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("community.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Internal key (e.g., "gl-00001")
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # External user identifier (e.g., POD code, SSO subject)
+    user_id: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    # Role: consumer, prosumer, producer, operator, admin
+    role: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Reference to area key in community.areas
+    area: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # Status: pending, active, suspended, inactive
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Extension fields
+    extra: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    community: Mapped["Community"] = relationship(back_populates="members")
+    assets: Mapped[list["Asset"]] = relationship(
+        back_populates="owner",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
 
-
-class Participant(Base):
-    __tablename__ = "participant"
     __table_args__ = (
-        UniqueConstraint("community_id", "key", name="uq_participant_community_key"),
-        Index("ix_participant_community_id", "community_id"),
+        UniqueConstraint("community_id", "key", name="uq_member_community_key"),
+        UniqueConstraint("community_id", "user_id", name="uq_member_community_user_id"),
+        Index("ix_member_community_id", "community_id"),
+        Index("ix_member_user_id", "user_id"),
+        Index("ix_member_role", "role"),
+        Index("ix_member_status", "status"),
     )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-
-    community_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("community.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    key: Mapped[str] = mapped_column(String(128), nullable=False)
-    iri: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # Optional participant typing (org/individual/dso/etc.)
-    kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    # Optional expanded IRI for auth identity (e.g., Keycloak subject IRI)
-    auth_iri: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-
-    community: Mapped["Community"] = relationship(back_populates="participants")
-
-    memberships: Mapped[list["Membership"]] = relationship(
-        back_populates="participant",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-
-class Membership(Base):
-    __tablename__ = "membership"
-    __table_args__ = (
-        UniqueConstraint("community_id", "key", name="uq_membership_community_key"),
-        UniqueConstraint(
-            "community_id", "participant_id", name="uq_membership_community_participant"
-        ),
-        Index("ix_membership_community_id", "community_id"),
-        Index("ix_membership_participant_id", "participant_id"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-
-    community_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("community.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    participant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("participant.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    key: Mapped[str] = mapped_column(String(128), nullable=False)
-    iri: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # Expanded IRIs (no CURIEs)
-    role_iri: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status_iri: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Optional temporal validity (kept string to avoid date parsing policy constraints)
-    valid_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    valid_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-
-    community: Mapped["Community"] = relationship(back_populates="memberships")
-    participant: Mapped["Participant"] = relationship(back_populates="memberships")
-
-
-class Site(Base):
-    __tablename__ = "site"
-    __table_args__ = (
-        UniqueConstraint("community_id", "key", name="uq_site_community_key"),
-        Index("ix_site_community_id", "community_id"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-
-    community_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("community.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    key: Mapped[str] = mapped_column(String(128), nullable=False)
-    iri: Mapped[str] = mapped_column(Text, nullable=False)
-
-    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    # Keep as a simple string; can be normalized later (geo areas, municipalities, etc.)
-    area: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-
-    community: Mapped["Community"] = relationship(back_populates="sites")
 
 
 class Asset(Base):
+    """
+    Unified asset table for all asset types.
+    
+    asset_type: pv, storage, meter, ev_charger, heat_pump, load
+    
+    Type-specific properties stored in JSONB `properties`:
+    - pv: rated_power, panel_type, inverter_power, orientation, tilt_angle
+    - storage: capacity, max_charge_power, max_discharge_power, battery_type
+    - meter: meter_type (consumption/production/bidirectional)
+    - ev_charger: max_power, charger_type, connector_types
+    - heat_pump: thermal_power, electrical_power, cop, heat_pump_type
+    - load: load_type, rated_power, controllable, priority
+    
+    For meters, sensor_id is promoted to a column for efficient lookup.
+    
+    Relationships stored in JSONB `relationships`:
+    - measures: list of asset keys this asset measures
+    - paired_with: asset key this asset is paired with
+    """
     __tablename__ = "asset"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    community_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("community.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("member.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Asset key (e.g., "pv-gl-00002", "meter-gl-00002")
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # Asset type discriminator
+    asset_type: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    # Promoted column for meter sensor_id (enables efficient lookup)
+    # Only populated for asset_type='meter'
+    sensor_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    # Type-specific properties as JSONB
+    properties: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Asset relationships as JSONB
+    # {"measures": ["asset-key-1", "asset-key-2"], "paired_with": "asset-key-3"}
+    relationships: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Extension fields
+    extra: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    community: Mapped["Community"] = relationship(back_populates="assets")
+    owner: Mapped["Member"] = relationship(back_populates="assets")
+
     __table_args__ = (
         UniqueConstraint("community_id", "key", name="uq_asset_community_key"),
         Index("ix_asset_community_id", "community_id"),
-        Index("ix_asset_owner_participant_id", "owner_participant_id"),
-        Index("ix_asset_site_id", "site_id"),
+        Index("ix_asset_owner_id", "owner_id"),
+        Index("ix_asset_type", "asset_type"),
+        # Partial index for meter sensor_id lookups (only where sensor_id is not null)
+        Index(
+            "ix_asset_sensor_id",
+            "sensor_id",
+            postgresql_where=(sensor_id.isnot(None)),
+        ),
+        # Composite index for common query: find meters by community + sensor_id
+        Index(
+            "ix_asset_community_sensor",
+            "community_id",
+            "sensor_id",
+            postgresql_where=(sensor_id.isnot(None)),
+        ),
     )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-
-    community_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("community.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    owner_participant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("participant.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    site_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("site.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-    key: Mapped[str] = mapped_column(String(128), nullable=False)
-    iri: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # Expanded IRI for asset category/type (PV, storage, etc.)
-    category_iri: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-
-    community: Mapped["Community"] = relationship(back_populates="assets")
-
-
-class Meter(Base):
-    __tablename__ = "meter"
-    __table_args__ = (
-        UniqueConstraint("community_id", "key", name="uq_meter_community_key"),
-        Index("ix_meter_community_id", "community_id"),
-        Index("ix_meter_owner_participant_id", "owner_participant_id"),
-        Index("ix_meter_site_id", "site_id"),
-        Index("ix_meter_sensor_id", "sensor_id"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-
-    community_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("community.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    owner_participant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("participant.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    site_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("site.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-    key: Mapped[str] = mapped_column(String(128), nullable=False)
-    iri: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # External sensor identifier as provided by the operator (used to locate timeseries elsewhere)
-    sensor_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    # Optional POD code (Italy)
-    pod: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-
-    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-
-    community: Mapped["Community"] = relationship(back_populates="meters")

@@ -1,9 +1,10 @@
 {
     "python.analysis.extraPaths": [
-        "celine"
+        "src",
+        "../celine-sdk/src"
     ],
     "yaml.schemas": {
-        "schemas/community/v0.3/community.schema.json": [
+        "schemas/community/v0.4/community.schema.json": [
             "rec/*.yaml",
             "**/rec*.yaml",
             "**/rec*.yml"
