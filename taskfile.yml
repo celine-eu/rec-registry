@@ -38,13 +38,7 @@ tasks:
     deps: [run]
     desc: "Import a community YAML (REPLACE mode). Usage: task import:community -- --file path.yaml"
     cmds:
-      - "{{.EXEC}} celine-rec-registry import community {{.CLI_ARGS}}"
-
-  import:community:example:
-    deps: [run]
-    desc: "Import community example"
-    cmds:
-      - task import:community -- --file rec-example.yaml
+      - "{{.EXEC}} celine-rec-registry import {{.CLI_ARGS}}"
 
   release:
     cmds:

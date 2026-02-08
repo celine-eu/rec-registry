@@ -1,3 +1,9 @@
+
+recs
+
+.git
+.egg-info
+.venv
 __pycache__
 
 # C extensions

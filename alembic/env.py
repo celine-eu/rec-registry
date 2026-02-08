@@ -11,7 +11,7 @@ from logging.config import fileConfig
 from urllib.parse import urlparse, urlunparse
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool, text
+from sqlalchemy import MetaData, engine_from_config, pool, text
 from sqlalchemy import create_engine
 
 from celine.rec_registry.db.models import *  # noqa
@@ -23,7 +23,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata: MetaData = Base.metadata
 
 logger = logging.getLogger("alembic.env")
 
