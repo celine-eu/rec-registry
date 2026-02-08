@@ -6,7 +6,6 @@ Exports community data to the v0.4 YAML format.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -54,26 +53,62 @@ async def export_community_bundle(
             "location": area_data.get("location", {"lat": 0, "lon": 0}),
         }
 
+    # Build community section
+    community_dict: dict[str, Any] = {
+        "id": community.key,
+        "name": community.name,
+    }
+
+    if community.description:
+        community_dict["description"] = community.description
+
+    # Add legal, links, contact, settings if present
+    if community.legal:
+        community_dict["legal"] = community.legal
+
+    if community.links:
+        community_dict["links"] = community.links
+
+    if community.contact:
+        community_dict["contact"] = community.contact
+
+    if community.settings:
+        community_dict["settings"] = community.settings
+
+    community_dict["areas"] = areas
+
+    # Add topology if present
+    if community.topology:
+        community_dict["topology"] = community.topology
+
     # Build members dict
     members = {}
     for member in sorted(community.members, key=lambda m: m.key):
         member_assets = _build_asset_collection(member.assets)
 
-        members[member.key] = {
+        member_dict: dict[str, Any] = {
             "user_id": member.user_id,
             "name": member.name,
             "role": member.role,
             "area": member.area,
             "status": member.status,
-            "assets": member_assets,
         }
+
+        # Add delivery_points if present
+        if member.delivery_points:
+            member_dict["delivery_points"] = member.delivery_points
+
+        # Add assets
+        member_dict["assets"] = member_assets
 
         # Add any extra fields
         if member.extra:
-            members[member.key].update(member.extra)
+            member_dict.update(member.extra)
+
+        members[member.key] = member_dict
 
     # Build bundle
-    bundle = {
+    bundle: dict[str, Any] = {
         "version": "1.0",
         "schema_version": "1.0",
         "metadata": {
@@ -90,16 +125,11 @@ async def export_community_bundle(
             "updated_by": "system",
             "description": community.description or f"{community.name} registry",
         },
-        "community": {
-            "id": community.key,
-            "name": community.name,
-            "description": community.description,
-            "areas": areas,
-        },
+        "community": community_dict,
         "members": members,
     }
 
-    # Add community extra fields
+    # Add community extra fields to bundle
     if community.extra:
         bundle["community"].update(community.extra)
 
@@ -130,7 +160,7 @@ async def export_community_bundle_yaml(
 
 def _build_asset_collection(assets: list[Asset]) -> dict:
     """Build asset collection dict organized by type."""
-    collection = {
+    collection: dict[str, dict] = {
         "pv": {},
         "storage": {},
         "meter": {},
@@ -157,6 +187,10 @@ def _build_asset_collection(assets: list[Asset]) -> dict:
         # Add type-specific properties
         if asset.properties:
             asset_dict.update(asset.properties)
+
+        # Add device specification
+        if asset.device:
+            asset_dict["device"] = asset.device
 
         # Add relationships
         if asset.relationships:

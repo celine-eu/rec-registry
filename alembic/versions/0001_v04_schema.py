@@ -2,9 +2,9 @@
 Initial migration for v0.4 REC Registry schema.
 
 Creates simplified schema:
-- community: REC community with embedded areas
-- member: community members with role, status, area
-- asset: all asset types in one table with type discriminator
+- community: REC community with areas, topology, legal, links, contact, settings
+- member: community members with role, status, area, delivery_points
+- asset: all asset types in one table with type discriminator, device spec
 
 Revision ID: 0001_v04_schema
 Revises: None
@@ -21,14 +21,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Drop old tables if they exist (clean slate)
-    op.execute("DROP TABLE IF EXISTS meter CASCADE")
-    op.execute("DROP TABLE IF EXISTS asset CASCADE")
-    op.execute("DROP TABLE IF EXISTS site CASCADE")
-    op.execute("DROP TABLE IF EXISTS membership CASCADE")
-    op.execute("DROP TABLE IF EXISTS participant CASCADE")
-    op.execute("DROP TABLE IF EXISTS community CASCADE")
-
     # ==========================================================================
     # Community table
     # ==========================================================================
@@ -40,6 +32,36 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column(
             "areas",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "topology",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column(
+            "legal",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "links",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "contact",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "settings",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
             server_default=sa.text("'{}'::jsonb"),
@@ -74,6 +96,12 @@ def upgrade() -> None:
         sa.Column("area", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=64), nullable=False),
         sa.Column(
+            "delivery_points",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column(
             "extra",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
@@ -82,13 +110,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
-    
+
     # Member indexes
     op.create_index("ix_member_community_id", "member", ["community_id"])
     op.create_index("ix_member_user_id", "member", ["user_id"])
     op.create_index("ix_member_role", "member", ["role"])
     op.create_index("ix_member_status", "member", ["status"])
-    
+
     # Member unique constraints
     op.create_unique_constraint(
         "uq_member_community_key", "member", ["community_id", "key"]
@@ -126,6 +154,12 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
         ),
         sa.Column(
+            "device",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
             "relationships",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
@@ -140,24 +174,24 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
-    
+
     # Asset indexes
     op.create_index("ix_asset_community_id", "asset", ["community_id"])
     op.create_index("ix_asset_owner_id", "asset", ["owner_id"])
     op.create_index("ix_asset_type", "asset", ["asset_type"])
-    
+
     # Partial index for sensor_id lookups (only where sensor_id is not null)
     op.execute("""
         CREATE INDEX ix_asset_sensor_id ON asset (sensor_id)
         WHERE sensor_id IS NOT NULL
     """)
-    
+
     # Composite index for community + sensor_id lookups
     op.execute("""
         CREATE INDEX ix_asset_community_sensor ON asset (community_id, sensor_id)
         WHERE sensor_id IS NOT NULL
     """)
-    
+
     # Asset unique constraint
     op.create_unique_constraint(
         "uq_asset_community_key", "asset", ["community_id", "key"]

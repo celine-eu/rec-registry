@@ -2,8 +2,8 @@
 CELINE REC Registry - Database Models (v0.4 Schema)
 
 Simplified flat model:
-- Community: REC community with embedded areas
-- Member: Community member with role, status, area reference
+- Community: REC community with embedded areas, topology, legal, links, contact, settings
+- Member: Community member with role, status, area reference, delivery_points
 - Asset: All asset types (pv, storage, meter, ev_charger, heat_pump, load) in one table
 """
 
@@ -23,11 +23,19 @@ class Community(Base):
     """
     Renewable Energy Community.
     
-    Areas are stored as embedded JSONB:
+    Areas stored as embedded JSONB:
     {
         "area_north": {"name": "North Area", "location": {"lat": 45.0, "lon": 11.0}},
         ...
     }
+    
+    Topology stored as JSONB list:
+    [
+        {"id": "PS-001", "type": "primary_substation", "name": "...", "operator": "..."},
+        {"id": "SS-001", "type": "secondary_substation", "parent": "PS-001", ...},
+    ]
+    
+    Legal, links, contact, settings stored as JSONB dicts.
     """
     __tablename__ = "community"
 
@@ -43,6 +51,35 @@ class Community(Base):
 
     # Embedded areas as JSONB
     areas: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Grid topology as JSONB list of nodes
+    topology: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+
+    # Legal information as JSONB
+    # {name, vat, fiscal_code, legal_form, registration_number, registered_office}
+    legal: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Public links as JSONB
+    # {website, logo, privacy_policy, terms, statute, regulations}
+    links: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Contact information as JSONB
+    # {email, pec, phone, address}
+    contact: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Operational settings as JSONB
+    # {timezone, currency, energy_unit, power_unit}
+    settings: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
 
@@ -81,10 +118,17 @@ class Member(Base):
     Community member (participant).
     
     - key: internal member key (e.g., "gl-00001")
-    - user_id: external system identifier (e.g., POD code or SSO subject)
+    - user_id: external identity system identifier (e.g., Keycloak UUID)
     - role: consumer, prosumer, producer, operator, admin
     - status: pending, active, suspended, inactive
     - area: reference to community area key
+    - delivery_points: list of physical delivery points (POD, CUPS, etc.)
+    
+    Delivery points stored as JSONB list:
+    [
+        {"id": "IT001E...", "type": "pod", "description": "Main", "tariff": "...", "active": true},
+        ...
+    ]
     """
     __tablename__ = "member"
 
@@ -101,7 +145,7 @@ class Member(Base):
     # Internal key (e.g., "gl-00001")
     key: Mapped[str] = mapped_column(String(128), nullable=False)
 
-    # External user identifier (e.g., POD code, SSO subject)
+    # External user identifier (e.g., Keycloak UUID)
     user_id: Mapped[str] = mapped_column(String(256), nullable=False)
 
     name: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -114,6 +158,11 @@ class Member(Base):
 
     # Status: pending, active, suspended, inactive
     status: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Delivery points as JSONB list
+    delivery_points: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
 
     # Extension fields
     extra: Mapped[dict] = mapped_column(
@@ -155,12 +204,15 @@ class Asset(Base):
     Type-specific properties stored in JSONB `properties`:
     - pv: rated_power, panel_type, inverter_power, orientation, tilt_angle
     - storage: capacity, max_charge_power, max_discharge_power, battery_type
-    - meter: meter_type (consumption/production/bidirectional)
-    - ev_charger: max_power, charger_type, connector_types
-    - heat_pump: thermal_power, electrical_power, cop, heat_pump_type
+    - meter: meter_type, pod, protocol
+    - ev_charger: max_power, charger_type, connector_types, smart_charging, bidirectional
+    - heat_pump: thermal_power, electrical_power, cop, eer, heat_pump_type
     - load: load_type, rated_power, controllable, priority
     
     For meters, sensor_id is promoted to a column for efficient lookup.
+    
+    Device specification stored in JSONB `device`:
+    {type, model, serial_number, mac_address, firmware_version}
     
     Relationships stored in JSONB `relationships`:
     - measures: list of asset keys this asset measures
@@ -198,6 +250,12 @@ class Asset(Base):
 
     # Type-specific properties as JSONB
     properties: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # SAREF-inspired device specification as JSONB
+    # {type, model, serial_number, mac_address, firmware_version}
+    device: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
 
