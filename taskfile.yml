@@ -13,7 +13,7 @@ tasks:
   run:
     desc: Start services
     cmds:
-      - docker compose up api
+      - uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
 
   db:reset:
     deps: [run]
