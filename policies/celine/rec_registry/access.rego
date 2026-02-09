@@ -5,8 +5,6 @@ package celine.rec_registry.access
 
 import rego.v1
 
-import data.celine.scopes
-
 # =============================================================================
 # REC REGISTRY AUTHORIZATION
 # =============================================================================
@@ -28,43 +26,43 @@ default reason := "unauthorized"
 # Generic admin access - requires rec_registry.admin scope
 allow if {
     input.action.name == "admin"
-    scopes.has_scope("rec_registry.admin")
+    data.celine.scopes.has_scope("rec_registry.admin")
 }
 
 reason := "admin access granted" if {
     input.action.name == "admin"
-    scopes.has_scope("rec_registry.admin")
+    data.celine.scopes.has_scope("rec_registry.admin")
 }
 
 # Import action - requires rec_registry.import scope
 allow if {
     input.action.name == "import"
-    scopes.has_scope("rec_registry.import")
+    data.celine.scopes.has_scope("rec_registry.import")
 }
 
 reason := "import access granted" if {
     input.action.name == "import"
-    scopes.has_scope("rec_registry.import")
+    data.celine.scopes.has_scope("rec_registry.import")
 }
 
 # Export action - requires rec_registry.export scope
 allow if {
     input.action.name == "export"
-    scopes.has_scope("rec_registry.export")
+    data.celine.scopes.has_scope("rec_registry.export")
 }
 
 reason := "export access granted" if {
     input.action.name == "export"
-    scopes.has_scope("rec_registry.export")
+    data.celine.scopes.has_scope("rec_registry.export")
 }
 
 # Super admin - rec_registry.admin wildcard matches all
 allow if {
-    scopes.has_scope("rec_registry.*")
+    data.celine.scopes.has_scope("rec_registry.*")
 }
 
 reason := "super admin access granted" if {
-    scopes.has_scope("rec_registry.*")
+    data.celine.scopes.has_scope("rec_registry.*")
 }
 
 # =============================================================================
@@ -78,5 +76,5 @@ reason := "missing required scope" if {
 
 reason := "authentication required" if {
     not allow
-    scopes.is_anonymous
+    data.celine.scopes.is_anonymous
 }

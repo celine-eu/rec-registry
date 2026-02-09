@@ -1,13 +1,13 @@
-# Dumpster configuration
-output: sources.txt
 extensions:
   - .py
   - .md
   - .yaml
   - .json
   - .toml
+  - .rego
 contents:
   - src
   - alembic
   - schemas
+  - policies
   - pyproject.toml

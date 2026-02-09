@@ -7,10 +7,16 @@ Commands:
 - list: List communities
 - tree: Show community structure
 - lookup: Lookup by user_id or sensor_id
+
+Authentication:
+- Client credentials: --client-id + --client-secret (admin operations)
+- User credentials: --user + --password (user operations)
+- Token: --token (pre-obtained JWT)
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +24,169 @@ import httpx
 import typer
 import yaml
 
-from celine.rec_registry.core.settings import settings
+from celine.sdk.auth import OidcClientCredentialsProvider
+from celine.rec_registry.cli.config import settings
 
 app = typer.Typer(name="celine-rec-registry", no_args_is_help=True)
+
+
+# =============================================================================
+# Authentication Helpers
+# =============================================================================
+
+
+async def _get_token_from_client_credentials(
+    auth_url: str,
+    client_id: str,
+    client_secret: str,
+    scope: str | None = None,
+) -> str:
+    """Get access token using client credentials flow."""
+    provider = OidcClientCredentialsProvider(
+        base_url=auth_url,
+        client_id=client_id,
+        client_secret=client_secret,
+        scope=scope,
+    )
+
+    access_token = await provider.get_token()
+    return access_token.access_token
+
+
+async def _get_token_from_password(
+    auth_url: str,
+    username: str,
+    password: str,
+    client_id: str = "cli",
+    scope: str | None = None,
+) -> str:
+    """Get access token using resource owner password flow."""
+    # OIDC token endpoint
+    token_url = f"{auth_url.rstrip('/')}/protocol/openid-connect/token"
+
+    data = {
+        "grant_type": "password",
+        "username": username,
+        "password": password,
+        "client_id": client_id,
+    }
+
+    if scope:
+        data["scope"] = scope
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(token_url, data=data)
+
+        if response.status_code != 200:
+            raise typer.BadParameter(
+                f"Authentication failed [{response.status_code}]: {response.text}"
+            )
+
+        token_data = response.json()
+        return token_data["access_token"]
+
+
+def _resolve_auth(
+    token: str | None,
+    client_id: str | None,
+    client_secret: str | None,
+    user: str | None,
+    password: str | None,
+    auth_url: str,
+    scope: str | None = None,
+) -> str:
+    """Resolve authentication and return access token.
+
+    Priority:
+    1. Explicit token
+    2. Client credentials
+    3. User credentials
+    4. Error
+    """
+    if token:
+        return token
+
+    if client_id and client_secret:
+        # Client credentials flow
+        return asyncio.run(
+            _get_token_from_client_credentials(
+                auth_url=auth_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                scope=scope,
+            )
+        )
+
+    if user and password:
+        # Resource owner password flow
+        return asyncio.run(
+            _get_token_from_password(
+                auth_url=auth_url,
+                username=user,
+                password=password,
+                scope=scope,
+            )
+        )
+
+    raise typer.BadParameter(
+        "Authentication required. Provide one of:\n"
+        "  --token <jwt>\n"
+        "  --client-id <id> --client-secret <secret>\n"
+        "  --user <username> --password <password>"
+    )
+
+
+# =============================================================================
+# Common Options
+# =============================================================================
+
+
+def _common_auth_options():
+    """Common authentication options."""
+    return [
+        typer.Option(
+            None,
+            "--token",
+            help="Pre-obtained JWT access token",
+            envvar="REGISTRY_TOKEN",
+        ),
+        typer.Option(
+            None,
+            "--client-id",
+            help="OAuth2 client ID (for admin operations)",
+            envvar="REGISTRY_CLIENT_ID",
+        ),
+        typer.Option(
+            None,
+            "--client-secret",
+            help="OAuth2 client secret",
+            envvar="REGISTRY_CLIENT_SECRET",
+        ),
+        typer.Option(
+            None,
+            "--user",
+            help="Username (for user operations)",
+            envvar="REGISTRY_USER",
+        ),
+        typer.Option(
+            None,
+            "--password",
+            help="User password",
+            envvar="REGISTRY_PASSWORD",
+        ),
+        typer.Option(
+            settings.oidc_base_url or "http://localhost:8080/realms/celine",
+            "--auth-url",
+            help="OIDC/Keycloak realm URL",
+            envvar="REGISTRY_AUTH_URL",
+        ),
+        typer.Option(
+            None,
+            "--scope",
+            help="OAuth2 scope (optional)",
+            envvar="REGISTRY_SCOPE",
+        ),
+    ]
 
 
 def _api_url(base: str, path: str) -> str:
@@ -32,9 +198,10 @@ def _get_json(
     client: httpx.Client,
     url: str,
     params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """GET request returning JSON."""
-    r = client.get(url, params=params)
+    r = client.get(url, params=params, headers=headers or {})
     if r.status_code >= 400:
         raise typer.BadParameter(f"GET {url} failed [{r.status_code}]: {r.text}")
     data = r.json()
@@ -73,13 +240,78 @@ def import_bundle(
         "--timeout",
         help="HTTP timeout in seconds",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID (for admin operations)",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username (for user operations)",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope (optional)",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     Import a YAML bundle (idempotent replacement import).
 
-    Deletes existing community and recreates it from the bundle.
-    Use --dry-run to validate without making changes.
+    Requires admin authentication (client credentials).
+    
+    Examples:
+        # With client credentials
+        celine-rec-registry import -f bundle.yaml \\
+            --client-id admin --client-secret secret
+        
+        # With pre-obtained token
+        celine-rec-registry import -f bundle.yaml --token $TOKEN
+        
+        # Using environment variables
+        export REGISTRY_CLIENT_ID=admin
+        export REGISTRY_CLIENT_SECRET=secret
+        celine-rec-registry import -f bundle.yaml
     """
+    # Resolve authentication
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
     yaml_text = file.read_text(encoding="utf-8")
 
     try:
@@ -96,9 +328,10 @@ def import_bundle(
 
     url = _api_url(api, "/admin/import")
     payload = {"bundle": bundle, "dry_run": dry_run}
+    headers = {"Authorization": f"Bearer {access_token}"}
 
     try:
-        r = httpx.post(url, json=payload, timeout=timeout)
+        r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -158,14 +391,71 @@ def export_bundle(
         "--timeout",
         help="HTTP timeout in seconds",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     Export a community to v0.4 YAML format.
+
+    Requires admin authentication.
     """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
     url = _api_url(api, "/admin/export")
+    headers = {"Authorization": f"Bearer {access_token}"}
 
     try:
-        r = httpx.get(url, params={"community": community}, timeout=timeout)
+        r = httpx.get(
+            url, params={"community": community}, headers=headers, timeout=timeout
+        )
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -216,17 +506,73 @@ def list_communities(
         "--timeout",
         help="HTTP timeout in seconds",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     List communities.
+
+    Can use admin or user authentication.
     """
-    url = _api_url(api, "/communities")
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
+    url = _api_url(api, "/admin/communities")  # Use admin endpoint for listing
     params: dict[str, Any] = {"limit": limit}
     if key:
         params["key"] = key
 
+    headers = {"Authorization": f"Bearer {access_token}"}
+
     with httpx.Client(timeout=timeout) as client:
-        data = _get_json(client, url, params=params)
+        data = _get_json(client, url, params=params, headers=headers)
 
     items = data.get("items", [])
     if not items:
@@ -267,26 +613,84 @@ def community_tree(
         max=5000,
         help="Maximum items per fetch",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     Show community structure tree.
     """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+
     with httpx.Client(timeout=timeout) as client:
         # Fetch community
-        c = _get_json(client, _api_url(api, f"/communities/{community}"))
+        c = _get_json(
+            client, _api_url(api, f"/admin/communities/{community}"), headers=headers
+        )
 
         # Fetch members
         members = _get_json(
             client,
-            _api_url(api, f"/communities/{community}/members"),
+            _api_url(api, f"/admin/communities/{community}/members"),
             params={"limit": max_items},
+            headers=headers,
         ).get("items", [])
 
         # Fetch assets
         assets = _get_json(
             client,
-            _api_url(api, f"/communities/{community}/assets"),
+            _api_url(api, f"/admin/communities/{community}/assets"),
             params={"limit": max_items},
+            headers=headers,
         ).get("items", [])
 
     # Index assets by owner
@@ -364,14 +768,67 @@ def lookup_user(
         "--timeout",
         help="HTTP timeout in seconds",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     Lookup a member by user_id across all communities.
     """
-    url = _api_url(api, f"/lookup/member-by-user-id/{user_id}")
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
+    url = _api_url(api, f"/admin/lookup/member-by-user-id/{user_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
 
     try:
-        r = httpx.get(url, timeout=timeout)
+        r = httpx.get(url, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -407,14 +864,67 @@ def lookup_sensor(
         "--timeout",
         help="HTTP timeout in seconds",
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
 ):
     """
     Lookup a meter by sensor_id across all communities.
     """
-    url = _api_url(api, f"/lookup/asset-by-sensor-id/{sensor_id}")
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+    )
+
+    url = _api_url(api, f"/admin/lookup/asset-by-sensor-id/{sensor_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
 
     try:
-        r = httpx.get(url, timeout=timeout)
+        r = httpx.get(url, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)

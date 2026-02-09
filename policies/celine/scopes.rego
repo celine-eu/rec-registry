@@ -2,6 +2,7 @@
 # title: Scope Matching
 # description: Shared scope matching logic - imported by all policies
 # scope: package
+
 package celine.scopes
 
 import rego.v1

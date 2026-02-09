@@ -5,15 +5,15 @@ vars:
   APP: celine.rec_registry.main:app
 
 tasks:
-  default:
-    desc: List available tasks
-    cmds:
-      - task --list
-
   run:
-    desc: Start services
+    desc: Run
     cmds:
       - uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
+
+  debug:
+    desc: Debug
+    cmds:
+      - DEBUG_ATTACH=nowait DEBUG_PORT=48004 uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
 
   db:reset:
     deps: [run]
