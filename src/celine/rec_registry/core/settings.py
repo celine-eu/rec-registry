@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # When enabled, JWT tokens are validated and user info is extracted
 
-    auth_enabled: bool = False
+    auth_enabled: bool = True
 
     # JWT verification settings
     # If verify_jwt is False, tokens are decoded without signature verification
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # When enabled, authorization decisions are delegated to the policies service
 
-    policies_enabled: bool = False
+    policies_enabled: bool = True
 
     # Policies service base URL
     policies_url: str = "http://api.celine.localhost/policies"

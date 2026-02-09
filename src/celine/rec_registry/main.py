@@ -5,9 +5,12 @@ CELINE REC Registry API - Main application.
 from fastapi import FastAPI
 
 from celine.rec_registry.core.middleware import PolicyMiddleware
-from celine.rec_registry.api.admin import router as admin_router
 from celine.rec_registry.api.meta import router as meta_router
-from celine.rec_registry.api.communities import router as communities_router
+from celine.rec_registry.api.user import router as user_router
+
+from celine.rec_registry.api.admin.communities import router as communities_router
+from celine.rec_registry.api.admin.lookup import router as lookup_router
+from celine.rec_registry.api.admin.management import router as management_router
 
 app = FastAPI(
     title="CELINE REC Registry API",
@@ -25,6 +28,9 @@ app = FastAPI(
 app.add_middleware(PolicyMiddleware)
 
 # Include routers
+app.include_router(user_router)
 app.include_router(meta_router)
-app.include_router(admin_router)
-app.include_router(communities_router)
+
+app.include_router(prefix="/admin", tags=["admin"], router=management_router)
+app.include_router(prefix="/admin", tags=["admin"], router=communities_router)
+app.include_router(prefix="/admin", tags=["admin"], router=lookup_router)

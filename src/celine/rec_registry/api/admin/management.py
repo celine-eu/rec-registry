@@ -11,7 +11,7 @@ from celine.rec_registry.schemas.bundle import ImportRequest, ImportReport
 from celine.rec_registry.services.importer import replacement_import_bundle
 from celine.rec_registry.services.exporter import export_community_bundle_yaml
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter()
 
 
 @router.post("/import", response_model=ImportReport)

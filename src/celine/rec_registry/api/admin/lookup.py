@@ -20,7 +20,7 @@ from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.core.settings import settings
 
-router = APIRouter(tags=["lookup"])
+router = APIRouter()
 
 
 # =============================================================================

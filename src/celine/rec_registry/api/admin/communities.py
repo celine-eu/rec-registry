@@ -14,13 +14,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.core.settings import settings
 
-router = APIRouter(tags=["registry"])
+router = APIRouter()
 
 
 # =============================================================================
