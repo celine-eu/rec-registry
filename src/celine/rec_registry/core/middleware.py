@@ -1,5 +1,5 @@
 """
-Access policy middleware with JWT authentication and policies service integration.
+Access policy middleware with JWT authentication and in-process policy evaluation.
 
 Rules:
 - Public paths (/health, /version, /docs, etc.): no auth required
@@ -11,6 +11,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from fastapi import Request
@@ -18,7 +19,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from celine.sdk.auth import JwtUser
-from celine.sdk.policies import AuthorizationClient, AuthorizationError
+from celine.sdk.policies import (
+    Action,
+    CachedPolicyEngine,
+    PolicyEngine,
+    PolicyInput,
+    Resource,
+    ResourceType,
+    Subject,
+    SubjectType,
+)
 
 from celine.rec_registry.core.settings import settings
 
@@ -51,20 +61,38 @@ class PolicyMiddleware(BaseHTTPMiddleware):
 
     - Public paths: no auth required
     - /me*: require valid JWT
-    - /admin*: require valid JWT + policies service check
+    - /admin*: require valid JWT + in-process policy check
     - Other paths: pass through
     """
 
     def __init__(self, app):
         super().__init__(app)
 
-        self._policies_client: AuthorizationClient | None = None
+        # Initialize in-process policy engine
+        self._policy_engine: CachedPolicyEngine | None = None
         if settings.policies_enabled:
-            self._policies_client = AuthorizationClient(
-                base_url=settings.policies_url,
-                timeout=settings.policies_timeout,
-            )
-            logger.info(f"Policies client initialized: {settings.policies_url}")
+            try:
+                # Create base engine
+                engine = PolicyEngine(
+                    policies_dir=settings.policies_dir,
+                    data_dir=settings.policies_data_dir,
+                )
+                engine.load()
+
+                # Wrap with cache
+                self._policy_engine = CachedPolicyEngine(
+                    engine=engine,
+                    cache_enabled=settings.policies_cache_enabled,
+                )
+
+                logger.info(
+                    f"Policy engine initialized: "
+                    f"{engine.policy_count} policies loaded, "
+                    f"packages: {engine.get_packages()}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize policy engine: {e}")
+                raise
 
         logger.info(
             f"PolicyMiddleware initialized: "
@@ -169,35 +197,79 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         action: str,
         resource_id: str,
     ) -> Decision:
-        """Check authorization via policies service."""
-        if self._policies_client is None:
+        """Check authorization via in-process policy evaluation."""
+        if self._policy_engine is None:
             return Decision(True)
 
-        auth_header = request.headers.get(settings.auth_header_name)
-        request_id = request.headers.get("X-Request-ID")
+        request_id = request.headers.get("X-Request-ID", "unknown")
 
+        # Build resource attributes
         resource_attributes = {"user_sub": user.sub}
         if user.email:
             resource_attributes["user_email"] = user.email
 
-        try:
-            response = await self._policies_client.authorize_detailed(
-                action=action,
-                resource_type=settings.policies_resource_type,
-                resource_id=resource_id,
-                resource_attributes=resource_attributes,
-                authorization_header=auth_header,
-                x_request_id=request_id,
-                x_source_service=settings.policies_source_service,
-            )
-            reason = getattr(response, "reason", None)
-            return Decision(allowed=response.allowed, reason=reason)
+        # Extract scopes from JWT claims
+        scopes = user.claims.get("scope", "")
+        if isinstance(scopes, str):
+            scopes = scopes.split()
+        elif not isinstance(scopes, list):
+            scopes = []
 
-        except AuthorizationError as e:
-            logger.error(f"Policies service error: {e}")
-            return Decision(False, reason="Authorization service unavailable")
+        # Extract groups from JWT claims
+        groups = user.claims.get("groups", [])
+        if not isinstance(groups, list):
+            groups = []
+
+        # Build policy input
+        policy_input = PolicyInput(
+            subject=Subject(
+                id=user.sub,
+                type=SubjectType.USER,
+                groups=groups,
+                scopes=scopes,
+                claims=user.claims,
+            ),
+            resource=Resource(
+                type=ResourceType(settings.policies_resource_type),
+                id=resource_id,
+                attributes=resource_attributes,
+            ),
+            action=Action(
+                name=action,
+                context={},
+            ),
+            environment={
+                "request_id": request_id,
+                "timestamp": time.time(),
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+
+        try:
+            # Evaluate policy in-process
+            decision = self._policy_engine.evaluate_decision(
+                policy_package=settings.policies_package,
+                policy_input=policy_input,
+            )
+
+            if decision.cached:
+                logger.debug(f"Policy decision from cache: allowed={decision.allowed}")
+            else:
+                logger.info(
+                    f"Policy decision: allowed={decision.allowed}, "
+                    f"reason={decision.reason}, "
+                    f"policy={decision.policy}"
+                )
+
+            return Decision(
+                allowed=decision.allowed,
+                reason=decision.reason or None,
+            )
+
         except Exception as e:
-            logger.error(f"Unexpected policies error: {e}")
+            logger.error(f"Policy evaluation error: {e}", exc_info=True)
+            # Fail closed - deny access on error
             return Decision(False, reason="Authorization check failed")
 
 

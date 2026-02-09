@@ -2,6 +2,8 @@
 Application settings using pydantic-settings.
 """
 
+from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,25 +48,47 @@ class Settings(BaseSettings):
     # Header name containing the JWT token
     auth_header_name: str = "authorization"
 
-    # ==========================================================================
-    # Policies Service
-    # ==========================================================================
-    # When enabled, authorization decisions are delegated to the policies service
+    # =============================================================================
+    # Policy Settings - UPDATED for in-process evaluation
+    # =============================================================================
 
-    policies_enabled: bool = True
+    policies_enabled: bool = Field(
+        default=True, description="Enable policy-based authorization"
+    )
 
-    # Policies service base URL
-    policies_url: str = "http://api.celine.localhost/policies"
+    # Policy engine settings (replaces policies_url)
+    policies_dir: Path = Field(
+        default=Path("./policies"),
+        description="Directory containing .rego policy files",
+    )
+    policies_data_dir: Path | None = Field(
+        default=None, description="Optional directory containing policy data JSON files"
+    )
 
-    # Policies service timeout in seconds
-    policies_timeout: float = 5.0
+    # Policy package to evaluate (service-specific)
+    policies_package: str = Field(
+        default="celine.rec_registry.access",
+        description="Policy package to evaluate for authorization",
+    )
 
-    # Resource type to use when calling policies service
-    # This identifies what kind of resource rec-registry manages
-    policies_resource_type: str = "rec_registry"
+    # Resource type for this service
+    policies_resource_type: str = Field(
+        default="rec_registry", description="Resource type for policy evaluation"
+    )
 
-    # Source service identifier sent to policies service
-    policies_source_service: str = "rec-registry"
+    # Source service identifier (for audit logging)
+    policies_source_service: str = Field(
+        default="rec-registry", description="Service identifier for audit logs"
+    )
+
+    # Cache settings
+    policies_cache_enabled: bool = Field(
+        default=True, description="Enable in-memory decision caching"
+    )
+    policies_cache_ttl: int = Field(default=300, description="Cache TTL in seconds")
+    policies_cache_maxsize: int = Field(
+        default=10000, description="Maximum cache entries"
+    )
 
 
 settings = Settings()
