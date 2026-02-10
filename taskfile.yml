@@ -1,7 +1,7 @@
 version: "3"
 
 vars:
-  EXEC: docker compose exec api uv run
+  EXEC: uv run
   APP: celine.rec_registry.main:app
 
 tasks:
@@ -16,26 +16,22 @@ tasks:
       - DEBUG_ATTACH=nowait DEBUG_PORT=48004 uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
 
   db:reset:
-    deps: [run]
     desc: Drop and recreate Postgres volume (DANGEROUS)
     cmds:
       - docker compose down -v
       - docker compose up -d db
 
   db:migrate:
-    deps: [run]
     desc: Apply Alembic migrations (upgrade head)
     cmds:
       - "{{.EXEC}} alembic upgrade head"
 
   db:revision:
-    deps: [run]
     desc: "Create a new Alembic revision (autogenerate). Usage: task db:revision -- -m <message>"
     cmds:
       - "{{.EXEC}} alembic revision --autogenerate {{.CLI_ARGS}}"
 
   import:community:
-    deps: [run]
     desc: "Import a community YAML (REPLACE mode). Usage: task import:community -- --file path.yaml"
     cmds:
       - "{{.EXEC}} celine-rec-registry import {{.CLI_ARGS}}"

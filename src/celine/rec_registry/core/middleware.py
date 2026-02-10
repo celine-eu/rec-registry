@@ -14,10 +14,6 @@ import logging
 import time
 from dataclasses import dataclass
 
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-
 from celine.sdk.auth import JwtUser
 from celine.sdk.policies import (
     Action,
@@ -29,6 +25,9 @@ from celine.sdk.policies import (
     Subject,
     SubjectType,
 )
+from fastapi import HTTPException, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from celine.rec_registry.core.settings import settings
 
@@ -276,8 +275,6 @@ class PolicyMiddleware(BaseHTTPMiddleware):
 # =============================================================================
 # FastAPI Dependencies
 # =============================================================================
-
-from fastapi import HTTPException
 
 
 async def require_user(request: Request) -> JwtUser:

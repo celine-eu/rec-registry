@@ -34,9 +34,6 @@ package-dir = {"" = "."}
 where = ["src"]
 include = ["celine.rec_registry*"]
 
-[tool.setuptools.package-data]
-"celine.rec_registry.resources" = ["*.jsonld", "*.ttl", "*.md"]
-
 [dependency-groups]
 dev = [
     "dumpster-cli>=1.3.2",
@@ -44,7 +41,6 @@ dev = [
     "debugpy>=1.8.16",
     "pytest>=8.4.2",
 ]
-
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]

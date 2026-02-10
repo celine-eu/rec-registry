@@ -1,4 +1,4 @@
-# Example policy for rec-registry service
+# Fixed REC Registry Access Policy
 # Save as: policies/celine/rec_registry/access.rego
 
 package celine.rec_registry.access
@@ -29,40 +29,33 @@ allow if {
     data.celine.scopes.has_scope("rec_registry.admin")
 }
 
+# Import action - requires rec_registry.import OR rec_registry.admin
+allow if {
+    input.action.name == "import"
+    data.celine.scopes.has_any_scope(["rec_registry.import", "rec_registry.admin"])
+}
+
+# Export action - requires rec_registry.export OR rec_registry.admin
+allow if {
+    input.action.name == "export"
+    data.celine.scopes.has_any_scope(["rec_registry.export", "rec_registry.admin"])
+}
+
+# =============================================================================
+# REASON - Use else chain to avoid conflicts
+# =============================================================================
+
 reason := "admin access granted" if {
+    allow
     input.action.name == "admin"
-    data.celine.scopes.has_scope("rec_registry.admin")
-}
-
-# Import action - requires rec_registry.import scope
-allow if {
+} else := "import access granted" if {
+    allow
     input.action.name == "import"
-    data.celine.scopes.has_scope("rec_registry.import")
-}
-
-reason := "import access granted" if {
-    input.action.name == "import"
-    data.celine.scopes.has_scope("rec_registry.import")
-}
-
-# Export action - requires rec_registry.export scope
-allow if {
+} else := "export access granted" if {
+    allow
     input.action.name == "export"
-    data.celine.scopes.has_scope("rec_registry.export")
-}
-
-reason := "export access granted" if {
-    input.action.name == "export"
-    data.celine.scopes.has_scope("rec_registry.export")
-}
-
-# Super admin - rec_registry.admin wildcard matches all
-allow if {
-    data.celine.scopes.has_scope("rec_registry.*")
-}
-
-reason := "super admin access granted" if {
-    data.celine.scopes.has_scope("rec_registry.*")
+} else := "access granted" if {
+    allow
 }
 
 # =============================================================================
