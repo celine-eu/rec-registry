@@ -1,13 +1,14 @@
 """
-User self-service API routes (/me).
+User self-service API routes (/user).
 
-Provides authenticated users access to their own information:
+Provides authenticated users access to their OWN information only:
 - Profile from JWT
 - Member details
 - Community membership
 - Own assets and delivery points
 
-Does NOT expose information about other users.
+Security: Does NOT expose information about other users.
+All responses use dedicated User* models that exclude sensitive fields.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,23 +20,37 @@ from celine.sdk.auth import JwtUser
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.core.middleware import require_user
+from celine.rec_registry.schemas.models import (
+    # User-specific models (no sensitive data leakage)
+    UserProfile,
+    UserMemberSummary,
+    UserCommunitySummary,
+    UserMembership,
+    UserMeResponse,
+    UserMemberDetail,
+    UserCommunityDetail,
+    UserAsset,
+    UserAssetDetail,
+    UserAssetsResponse,
+    UserDeliveryPointsResponse,
+    DeliveryPoint,
+    Area,
+    TopologyNode,
+)
 
 router = APIRouter(prefix="/user", tags=["me"])
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=UserMeResponse,
+)
 async def get_me(
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Get current user's profile and membership information.
-
-    Returns:
-    - JWT profile information
-    - Community membership (if any)
-    - Member details
-    - Summary of owned assets
+    Get current user's profile and membership summary.
     """
     result = await session.execute(
         select(Member, Community)
@@ -44,58 +59,62 @@ async def get_me(
     )
     row = result.first()
 
-    response = {
-        "profile": {
-            "sub": user.sub,
-            "email": user.email,
-            "name": user.name,
-            "preferred_username": user.preferred_username,
-        },
-        "membership": None,
-    }
+    profile = UserProfile(
+        sub=user.sub,
+        email=user.email,
+        name=user.name,
+        preferred_username=user.preferred_username,
+    )
 
-    if row:
-        member, community = row
+    if row is None:
+        return UserMeResponse(profile=profile, membership=None)
 
-        # Count assets by type
-        assets_result = await session.execute(
-            select(Asset).where(Asset.owner_id == member.id)
-        )
-        assets = assets_result.scalars().all()
+    member, community = row
 
-        asset_counts = {}
-        for asset in assets:
-            asset_counts[asset.asset_type] = asset_counts.get(asset.asset_type, 0) + 1
+    # Count assets by type
+    assets_result = await session.execute(
+        select(Asset).where(Asset.owner_id == member.id)
+    )
+    assets = assets_result.scalars().all()
 
-        response["membership"] = {
-            "member": {
-                "key": member.key,
-                "name": member.name,
-                "role": member.role,
-                "area": member.area,
-                "status": member.status,
-            },
-            "community": {
-                "key": community.key,
-                "name": community.name,
-                "description": community.description,
-            },
-            "delivery_points_count": (
-                len(member.delivery_points) if member.delivery_points else 0
-            ),
-            "assets_count": asset_counts,
-        }
+    asset_counts: dict[str, int] = {}
+    for asset in assets:
+        asset_counts[asset.asset_type] = asset_counts.get(asset.asset_type, 0) + 1
 
-    return response
+    membership = UserMembership(
+        member=UserMemberSummary(
+            key=member.key,
+            name=member.name,
+            role=member.role,
+            area=member.area,
+            status=member.status,
+        ),
+        community=UserCommunitySummary(
+            key=community.key,
+            name=community.name,
+            description=community.description,
+        ),
+        delivery_points_count=(
+            len(member.delivery_points) if member.delivery_points else 0
+        ),
+        assets_count=asset_counts,
+    )
+
+    return UserMeResponse(profile=profile, membership=membership)
 
 
-@router.get("/member")
+@router.get(
+    "/member",
+    response_model=UserMemberDetail,
+)
 async def get_my_member(
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Get current user's full member details including delivery points.
+    Get current user's full member details.
+
+    Note: Does not include user_id in response (user already knows it).
     """
     member = await session.scalar(select(Member).where(Member.user_id == user.sub))
 
@@ -104,27 +123,31 @@ async def get_my_member(
             status_code=404, detail="You are not a member of any community"
         )
 
-    return {
-        "key": member.key,
-        "user_id": member.user_id,
-        "name": member.name,
-        "role": member.role,
-        "area": member.area,
-        "status": member.status,
-        "delivery_points": member.delivery_points,
-        "extra": member.extra,
-        "created_at": member.created_at.isoformat() if member.created_at else None,
-        "updated_at": member.updated_at.isoformat() if member.updated_at else None,
-    }
+    return UserMemberDetail(
+        key=member.key,
+        name=member.name,
+        role=member.role,
+        area=member.area,
+        status=member.status,
+        delivery_points=[DeliveryPoint(**dp) for dp in (member.delivery_points or [])],
+        extra=member.extra or {},
+        created_at=member.created_at.isoformat() if member.created_at else None,
+        updated_at=member.updated_at.isoformat() if member.updated_at else None,
+    )
 
 
-@router.get("/community")
+@router.get(
+    "/community",
+    response_model=UserCommunityDetail,
+)
 async def get_my_community(
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
     Get the community the current user belongs to.
+
+    Includes user's own area and role for context.
     """
     result = await session.execute(
         select(Member, Community)
@@ -140,29 +163,34 @@ async def get_my_community(
 
     member, community = row
 
-    return {
-        "key": community.key,
-        "name": community.name,
-        "description": community.description,
-        "legal": community.legal,
-        "links": community.links,
-        "contact": community.contact,
-        "settings": community.settings,
-        "areas": community.areas,
-        "topology": community.topology,
-        "your_area": member.area,
-        "your_role": member.role,
-    }
+    return UserCommunityDetail(
+        key=community.key,
+        name=community.name,
+        description=community.description,
+        legal=community.legal or {},
+        links=community.links or {},
+        contact=community.contact or {},
+        settings=community.settings or {},
+        areas={k: Area(**v) for k, v in (community.areas or {}).items()},
+        topology=[TopologyNode(**n) for n in (community.topology or [])],
+        your_area=member.area,
+        your_role=member.role,
+    )
 
 
-@router.get("/assets")
+@router.get(
+    "/assets",
+    response_model=UserAssetsResponse,
+)
 async def get_my_assets(
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
     asset_type: str | None = Query(default=None, description="Filter by asset type"),
 ):
     """
-    Get current user's assets. Optionally filter by asset_type.
+    Get current user's assets.
+
+    Note: Does not include owner info (user already knows it's theirs).
     """
     member = await session.scalar(select(Member).where(Member.user_id == user.sub))
 
@@ -177,24 +205,26 @@ async def get_my_assets(
 
     assets = (await session.scalars(query)).all()
 
-    return {
-        "items": [
-            {
-                "key": a.key,
-                "asset_type": a.asset_type,
-                "name": a.name,
-                "sensor_id": a.sensor_id,
-                "properties": a.properties,
-                "device": a.device,
-                "relationships": a.relationships,
-            }
-            for a in sorted(assets, key=lambda x: x.key)
-        ],
-        "total": len(assets),
-    }
+    items = [
+        UserAsset(
+            key=a.key,
+            asset_type=a.asset_type,
+            name=a.name,
+            sensor_id=a.sensor_id,
+            properties=a.properties or {},
+            device=a.device or {},
+            relationships=a.relationships or {},
+        )
+        for a in sorted(assets, key=lambda x: x.key)
+    ]
+
+    return UserAssetsResponse(items=items, total=len(items))
 
 
-@router.get("/assets/{asset_key}")
+@router.get(
+    "/assets/{asset_key}",
+    response_model=UserAssetDetail,
+)
 async def get_my_asset(
     asset_key: str,
     user: JwtUser = Depends(require_user),
@@ -219,27 +249,30 @@ async def get_my_asset(
             status_code=404, detail="Asset not found or not owned by you"
         )
 
-    return {
-        "key": asset.key,
-        "asset_type": asset.asset_type,
-        "name": asset.name,
-        "sensor_id": asset.sensor_id,
-        "properties": asset.properties,
-        "device": asset.device,
-        "relationships": asset.relationships,
-        "extra": asset.extra,
-        "created_at": asset.created_at.isoformat() if asset.created_at else None,
-        "updated_at": asset.updated_at.isoformat() if asset.updated_at else None,
-    }
+    return UserAssetDetail(
+        key=asset.key,
+        asset_type=asset.asset_type,
+        name=asset.name,
+        sensor_id=asset.sensor_id,
+        properties=asset.properties or {},
+        device=asset.device or {},
+        relationships=asset.relationships or {},
+        extra=asset.extra or {},
+        created_at=asset.created_at.isoformat() if asset.created_at else None,
+        updated_at=asset.updated_at.isoformat() if asset.updated_at else None,
+    )
 
 
-@router.get("/delivery-points")
+@router.get(
+    "/delivery-points",
+    response_model=UserDeliveryPointsResponse,
+)
 async def get_my_delivery_points(
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Get current user's delivery points (PODs, CUPS, etc.).
+    Get current user's delivery points.
     """
     member = await session.scalar(select(Member).where(Member.user_id == user.sub))
 
@@ -248,7 +281,6 @@ async def get_my_delivery_points(
             status_code=404, detail="You are not a member of any community"
         )
 
-    return {
-        "items": member.delivery_points or [],
-        "total": len(member.delivery_points) if member.delivery_points else 0,
-    }
+    items = [DeliveryPoint(**dp) for dp in (member.delivery_points or [])]
+
+    return UserDeliveryPointsResponse(items=items, total=len(items))

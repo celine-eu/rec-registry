@@ -82,7 +82,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 # Wrap with cache
                 self._policy_engine = CachedPolicyEngine(
                     engine=engine,
-                    cache_enabled=settings.policies_cache_enabled,
+                    enabled=settings.policies_cache_enabled,
                 )
 
                 logger.info(
