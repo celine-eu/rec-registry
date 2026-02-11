@@ -34,7 +34,7 @@ tasks:
   import:community:
     desc: "Import a community YAML (REPLACE mode). Usage: task import:community -- --file path.yaml"
     cmds:
-      - "{{.EXEC}} celine-rec-registry import {{.CLI_ARGS}}"
+      - "{{.EXEC}} celine-rec-registry import --client-id celine-cli --client-secret celine-cli {{.CLI_ARGS}}"
 
   release:
     cmds:
