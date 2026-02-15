@@ -120,7 +120,7 @@ async def get_my_member(
 
     if member is None:
         raise HTTPException(
-            status_code=404, detail="You are not a member of any community"
+            status_code=403, detail="You are not a member of any community"
         )
 
     return UserMemberDetail(
@@ -158,7 +158,7 @@ async def get_my_community(
 
     if row is None:
         raise HTTPException(
-            status_code=404, detail="You are not a member of any community"
+            status_code=403, detail="You are not a member of any community"
         )
 
     member, community = row
@@ -196,7 +196,7 @@ async def get_my_assets(
 
     if member is None:
         raise HTTPException(
-            status_code=404, detail="You are not a member of any community"
+            status_code=403, detail="You are not a member of any community"
         )
 
     query = select(Asset).where(Asset.owner_id == member.id)
@@ -237,7 +237,7 @@ async def get_my_asset(
 
     if member is None:
         raise HTTPException(
-            status_code=404, detail="You are not a member of any community"
+            status_code=403, detail="You are not a member of any community"
         )
 
     asset = await session.scalar(
@@ -278,7 +278,7 @@ async def get_my_delivery_points(
 
     if member is None:
         raise HTTPException(
-            status_code=404, detail="You are not a member of any community"
+            status_code=403, detail="You are not a member of any community"
         )
 
     items = [DeliveryPoint(**dp) for dp in (member.delivery_points or [])]

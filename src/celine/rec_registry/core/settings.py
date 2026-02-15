@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from celine.sdk.settings.models import OidcSettings
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -23,32 +25,13 @@ class Settings(BaseSettings):
     default_page_size: int = 50
     max_page_size: int = 500
 
-    # ==========================================================================
-    # Authentication
-    # ==========================================================================
-    # When enabled, JWT tokens are validated and user info is extracted
+    oidc: OidcSettings = OidcSettings(audience="svc-rec-registry")
 
     auth_enabled: bool = True
-
-    # JWT verification settings
-    # If verify_jwt is False, tokens are decoded without signature verification
-    # (assumes upstream proxy like oauth2-proxy already verified)
-    auth_verify_jwt: bool = False
-
-    # JWKS URI for JWT signature verification (required if auth_verify_jwt=True)
-    # Example: "https://auth.example.com/.well-known/jwks.json"
-    auth_jwks_uri: str | None = None
-
-    # Expected JWT issuer (optional, for validation)
-    auth_issuer: str | None = None
-
-    # Expected JWT audience (optional, for validation)
-    auth_audience: str | None = None
-
-    # Header name containing the JWT token
     auth_header_name: str = "authorization"
 
     # =============================================================================
+
     # Policy Settings - UPDATED for in-process evaluation
     # =============================================================================
 

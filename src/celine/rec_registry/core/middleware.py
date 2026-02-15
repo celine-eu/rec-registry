@@ -175,13 +175,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             return None
 
         try:
-            return JwtUser.from_token(
-                auth_header,
-                verify=settings.auth_verify_jwt,
-                jwks_uri=settings.auth_jwks_uri,
-                audience=settings.auth_audience,
-                issuer=settings.auth_issuer,
-            )
+            return JwtUser.from_token(auth_header, oidc=settings.oidc)
         except ValueError as e:
             logger.warning(f"Invalid JWT token: {e}")
             return None
