@@ -271,7 +271,7 @@ def import_bundle(
         envvar="REGISTRY_PASSWORD",
     ),
     auth_url: str = typer.Option(
-        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        settings.oidc_base_url or "http://keycloak.celine.localhost/realms/celine",
         "--auth-url",
         help="OIDC/Keycloak realm URL",
         envvar="REGISTRY_AUTH_URL",
