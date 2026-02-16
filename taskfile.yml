@@ -1,19 +1,15 @@
 version: "3"
 
-vars:
-  EXEC: uv run
-  APP: celine.rec_registry.main:app
-
 tasks:
   run:
     desc: Run
     cmds:
-      - uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
+      - uv run uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004 --reload
 
   debug:
     desc: Debug
     cmds:
-      - DEBUG_ATTACH=nowait DEBUG_PORT=48004 uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload
+      - DEBUG_ATTACH=nowait DEBUG_PORT=48004 uv run uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004 --reload
 
   db:reset:
     desc: Drop and recreate Postgres volume (DANGEROUS)
@@ -24,17 +20,17 @@ tasks:
   db:migrate:
     desc: Apply Alembic migrations (upgrade head)
     cmds:
-      - "{{.EXEC}} alembic upgrade head"
+      - "uv run alembic upgrade head"
 
   db:revision:
     desc: "Create a new Alembic revision (autogenerate). Usage: task db:revision -- -m <message>"
     cmds:
-      - "{{.EXEC}} alembic revision --autogenerate {{.CLI_ARGS}}"
+      - "uv run alembic revision --autogenerate {{.CLI_ARGS}}"
 
   import:community:
     desc: "Import a community YAML (REPLACE mode). Usage: task import:community -- --file path.yaml"
     cmds:
-      - "{{.EXEC}} celine-rec-registry import --client-id celine-cli --client-secret celine-cli {{.CLI_ARGS}}"
+      - "uv run celine-rec-registry import --client-id celine-cli --client-secret celine-cli {{.CLI_ARGS}}"
 
   release:
     cmds:

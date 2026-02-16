@@ -26,9 +26,10 @@ RUN uv sync --no-editable
 
 # Copy application code
 COPY src ./src
+COPY policies ./policies
 COPY alembic ./alembic
 COPY alembic.ini ./
 
 EXPOSE 8004
 
-CMD ["uv", "run", "uvicorn", "celine.rec_registry.main:app", "--host", "0.0.0.0", "--port", "8004"]
+CMD ["uv", "run", "uvicorn", "celine.rec_registry.main:create_app", "--host", "0.0.0.0", "--port", "8004"]

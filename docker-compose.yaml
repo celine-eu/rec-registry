@@ -4,7 +4,7 @@ volumes:
 services:
   api:
     command: >-
-      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:app --host 0.0.0.0 --port 8004 --reload"
+      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004"
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,18 +12,16 @@ services:
       - "8004:8004"
     restart: unless-stopped
     volumes:
-      - ./src:/app/src
-      - ./pyproject.toml:/app/pyproject.toml
-      - ./uv.lock:/app/uv.lock
       - ./recs:/app/recs
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/health'').read();"',
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8004/health'').read();"',
         ]
       interval: 5s
       timeout: 3s
       retries: 30
+    extra_hosts:
+      - "keycloak.celine.localhost:172.17.0.1"
+      - "api.celine.localhost:172.17.0.1"
