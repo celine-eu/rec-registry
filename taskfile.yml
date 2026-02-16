@@ -32,6 +32,11 @@ tasks:
     cmds:
       - "uv run celine-rec-registry import --client-id celine-cli --client-secret celine-cli {{.CLI_ARGS}}"
 
+  import:community:example:
+    desc: "Import the example community YAML"
+    cmds:
+      - task import:community -- --file recs/rec-example.yaml
+
   release:
     cmds:
       - uv run semantic-release -v version --no-vcs-release
