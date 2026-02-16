@@ -5,9 +5,8 @@
     ],
     "yaml.schemas": {
         "schemas/community/v0.4/community.schema.json": [
-            "rec/*.yaml",
-            "**/rec*.yaml",
-            "**/rec*.yml"
+            "recs/*.yaml",
+            "recs/*.yml",
         ]
     }
 }
