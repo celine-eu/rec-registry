@@ -23,22 +23,28 @@ default reason := "unauthorized"
 # ADMIN ACTIONS
 # =============================================================================
 
-# Generic admin access - requires rec_registry.admin scope
+# Generic admin access - requires rec-registry.admin scope
 allow if {
     input.action.name == "admin"
-    data.celine.scopes.has_scope("rec_registry.admin")
+    data.celine.scopes.has_scope("rec-registry.admin")
 }
 
-# Import action - requires rec_registry.import OR rec_registry.admin
+# Import action - requires rec-registry.import OR rec-registry.admin
 allow if {
     input.action.name == "import"
-    data.celine.scopes.has_any_scope(["rec_registry.import", "rec_registry.admin"])
+    data.celine.scopes.has_any_scope(["rec-registry.import", "rec-registry.admin"])
 }
 
-# Export action - requires rec_registry.export OR rec_registry.admin
+# Export action - requires rec-registry.export OR rec-registry.admin
 allow if {
     input.action.name == "export"
-    data.celine.scopes.has_any_scope(["rec_registry.export", "rec_registry.admin"])
+    data.celine.scopes.has_any_scope(["rec-registry.export", "rec-registry.admin"])
+}
+
+# Lookup action - requires rec-registry.lookup OR rec-registry.admin
+allow if {
+    input.action.name == "lookup"
+    data.celine.scopes.has_any_scope(["rec-registry.lookup", "rec-registry.admin"])
 }
 
 # =============================================================================
@@ -54,6 +60,9 @@ reason := "admin access granted" if {
 } else := "export access granted" if {
     allow
     input.action.name == "export"
+} else := "lookup access granted" if {
+    allow
+    input.action.name == "lookup"
 } else := "access granted" if {
     allow
 }

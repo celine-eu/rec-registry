@@ -26,6 +26,7 @@ from celine.rec_registry.schemas.models import (
     LookupByDeliveryPointResponse,
     GlobalMemberLookup,
     GlobalAssetLookup,
+    SensorIdsBatchRequest,
 )
 
 router = APIRouter()
@@ -35,9 +36,9 @@ router = APIRouter()
 # Global Lookups
 # =============================================================================
 
-
 @router.get(
     "/lookup/community-by-user-id/{user_id:path}",
+    operation_id="lookup_community_by_user_id",
     response_model=LookupByUserIdResponse,
 )
 async def lookup_community_by_user_id(
@@ -75,6 +76,7 @@ async def lookup_community_by_user_id(
 
 @router.get(
     "/lookup/community-by-sensor-id/{sensor_id:path}",
+    operation_id="lookup_community_by_sensor_id",
     response_model=LookupBySensorIdResponse,
 )
 async def lookup_community_by_sensor_id(
@@ -120,6 +122,7 @@ async def lookup_community_by_sensor_id(
 
 @router.get(
     "/lookup/community-by-delivery-point/{dp_id:path}",
+    operation_id="lookup_community_by_delivery_point",
     response_model=LookupByDeliveryPointResponse,
 )
 async def lookup_community_by_delivery_point(
@@ -156,6 +159,7 @@ async def lookup_community_by_delivery_point(
 
 @router.get(
     "/lookup/member-by-user-id/{user_id:path}",
+    operation_id="lookup_member_by_user_id",
     response_model=GlobalMemberLookup,
 )
 async def lookup_member_by_user_id(
@@ -190,6 +194,7 @@ async def lookup_member_by_user_id(
 
 @router.get(
     "/lookup/asset-by-sensor-id/{sensor_id:path}",
+    operation_id="lookup_asset_by_sensor_id",
     response_model=GlobalAssetLookup,
 )
 async def lookup_asset_by_sensor_id(
@@ -223,3 +228,38 @@ async def lookup_asset_by_sensor_id(
         community_key=c.key,
         community_name=c.name,
     )
+
+@router.post(
+    "/lookup/assets-by-sensor-ids",
+    operation_id="lookup_assets_by_sensor_ids",
+    response_model=list[GlobalAssetLookup],
+)
+async def lookup_assets_by_sensor_ids(
+    body: SensorIdsBatchRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Find assets by multiple sensor_ids across all communities."""
+    result = await session.execute(
+        select(Asset, Member, Community)
+        .join(Member, Asset.owner_id == Member.id)
+        .join(Community, Asset.community_id == Community.id)
+        .where(Asset.sensor_id.in_(body.sensor_ids))
+    )
+
+    return [
+        GlobalAssetLookup(
+            id=str(a.id),
+            key=a.key,
+            asset_type=a.asset_type,
+            name=a.name,
+            sensor_id=a.sensor_id,
+            properties=a.properties or {},
+            device=a.device or {},
+            relationships=a.relationships or {},
+            owner_key=m.key,
+            owner_user_id=m.user_id,
+            community_key=c.key,
+            community_name=c.name,
+        )
+        for a, m, c in result.all()
+    ]

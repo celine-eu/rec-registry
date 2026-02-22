@@ -384,3 +384,6 @@ class UserAssetsResponse(BaseModel):
 class UserDeliveryPointsResponse(BaseModel):
     items: list[DeliveryPoint]
     total: int
+
+class SensorIdsBatchRequest(BaseModel):
+    sensor_ids: list[str]

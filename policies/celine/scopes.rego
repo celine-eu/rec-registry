@@ -14,9 +14,9 @@ import rego.v1
 # Scope convention: {service}.{resource}.{action}
 #
 # Matching rules:
-#   1. Exact match: "rec_registry.admin" matches "rec_registry.admin"
-#   2. Admin override: "rec_registry.admin" matches any "rec_registry.*"
-#   3. Wildcard: "rec_registry.*" matches "rec_registry.{admin,import,export}"
+#   1. Exact match: "rec-registry.admin" matches "rec-registry.admin"
+#   2. Admin override: "rec-registry.admin" matches any "rec-registry.*"
+#   3. Wildcard: "rec-registry.*" matches "rec-registry.{admin,import,export}"
 #
 # =============================================================================
 

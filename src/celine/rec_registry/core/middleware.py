@@ -158,6 +158,8 @@ class PolicyMiddleware(BaseHTTPMiddleware):
 
     def _get_admin_action(self, path: str) -> str:
         """Get action name for admin paths."""
+        if "lookup" in path:
+            return "lookup"
         if "import" in path:
             return "import"
         if "export" in path:
