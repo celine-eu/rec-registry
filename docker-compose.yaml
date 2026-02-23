@@ -4,7 +4,7 @@ volumes:
 services:
   api:
     command: >-
-      sh -lc "uv run alembic upgrade head && uv run uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004"
+      sh -lc "uv run alembic upgrade head && .venv/bin/uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004"
     build:
       context: .
       dockerfile: Dockerfile
