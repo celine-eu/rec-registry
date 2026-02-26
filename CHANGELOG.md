@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-02-26)
+
+### Bug Fixes
+
+- Use local venv
+  ([`27fef74`](https://github.com/celine-eu/rec-registry/commit/27fef7426f0c0908987704f7f2d95c2db8857818))
+
+
 ## v1.1.0 (2026-02-25)
 
 ### Bug Fixes
