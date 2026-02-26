@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.3 (2026-02-26)
+
+### Bug Fixes
+
+- Use hatch for build
+  ([`df8e088`](https://github.com/celine-eu/rec-registry/commit/df8e0887a2e2d7ab1d5662365fb881a863fe8ed8))
+
+
 ## v1.1.2 (2026-02-26)
 
 ### Bug Fixes
