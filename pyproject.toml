@@ -27,12 +27,8 @@ celine-rec-registry = "celine.rec_registry.cli.main:main"
 [tool.uv]
 package = true
 
-[tool.setuptools]
-package-dir = {"" = "."}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["celine.rec_registry*"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/celine/rec_registry"]
 
 [dependency-groups]
 dev = [
