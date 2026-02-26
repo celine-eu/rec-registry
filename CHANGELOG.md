@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.4 (2026-02-26)
+
+### Bug Fixes
+
+- Hatch false positive
+  ([`066e57d`](https://github.com/celine-eu/rec-registry/commit/066e57d41cd55b4ff00cadf451c0a6b82366b5af))
+
+
 ## v1.1.3 (2026-02-26)
 
 ### Bug Fixes
