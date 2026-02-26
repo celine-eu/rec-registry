@@ -32,4 +32,4 @@ COPY alembic.ini ./
 
 EXPOSE 8004
 
-CMD ["uv", "run", "uvicorn", "celine.rec_registry.main:create_app", "--host", "0.0.0.0", "--port", "8004"]
+CMD [".venv/bin/uvicorn", "celine.rec_registry.main:create_app", "--host", "0.0.0.0", "--port", "8004"]
