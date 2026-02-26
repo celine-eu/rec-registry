@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-02-26)
+
+### Bug Fixes
+
+- Use hatch for build
+  ([`f7a1f1a`](https://github.com/celine-eu/rec-registry/commit/f7a1f1ac4e13716f1055a8abc55363debaddad5f))
+
+### Chores
+
+- Use local venv
+  ([`18a427a`](https://github.com/celine-eu/rec-registry/commit/18a427a251bc2de0d074b6d3fa55ed895ae64319))
+
+
 ## v1.1.1 (2026-02-26)
 
 ### Bug Fixes
