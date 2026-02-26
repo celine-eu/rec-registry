@@ -28,7 +28,8 @@ celine-rec-registry = "celine.rec_registry.cli.main:main"
 package = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/celine/rec_registry"]
+only-include = ["src/celine/rec_registry"]
+sources = {"src" = ""}
 
 [dependency-groups]
 dev = [
