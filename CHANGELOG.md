@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-02-27)
+
+### Features
+
+- Fix image for deployment
+  ([`67f19cc`](https://github.com/celine-eu/rec-registry/commit/67f19cc546e3bc33f8cb6deccb621f639487bf5b))
+
+
 ## v1.1.4 (2026-02-26)
 
 ### Bug Fixes
