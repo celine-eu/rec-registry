@@ -209,3 +209,4 @@ __marimo__/
 # Dumpster output
 .dumpster
 sources.txt
+skaffold

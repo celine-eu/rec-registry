@@ -2,12 +2,27 @@ extensions:
   - .py
   - .md
   - .yaml
+  - .yml
   - .json
   - .toml
   - .rego
-contents:
-  - src
-  - alembic
-  - schemas
-  - policies
-  - pyproject.toml
+
+dumps:
+  - name: sources
+    contents:
+      - src
+      - alembic
+      - schemas
+      - policies
+      - pyproject.toml
+  - name: all
+    contents:
+      - src
+      - alembic
+      - schemas
+      - policies
+      - recs
+      - pyproject.toml
+      - Dockerfile
+      - docker-compose.yaml
+      - taskfile.yaml

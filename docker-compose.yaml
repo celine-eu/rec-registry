@@ -2,15 +2,21 @@ volumes:
   pgdata:
 
 services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
-    command: >-
-      sh -lc "uv run alembic upgrade head && .venv/bin/uvicorn celine.rec_registry.main:create_app --host 0.0.0.0 --port 8004"
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "8004:8004"
-    restart: unless-stopped
     volumes:
       - ./recs:/app/recs
     healthcheck:
@@ -22,6 +28,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "keycloak.celine.localhost:172.17.0.1"
       - "api.celine.localhost:172.17.0.1"
