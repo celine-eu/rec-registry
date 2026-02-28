@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-02-28)
+
+### Features
+
+- Add verify_ssl flag
+  ([`e28d0b8`](https://github.com/celine-eu/rec-registry/commit/e28d0b8a1305a1f87b78f92c0639f3d77239fd0e))
+
+
 ## v1.2.0 (2026-02-27)
 
 ### Features
