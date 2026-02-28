@@ -57,6 +57,11 @@ class CLISettings(BaseSettings):
         description="OIDC/Keycloak realm URL for token acquisition",
     )
 
+    oidc_verify_ssl: bool = Field(
+        default=True,
+        description="Verify TLS on OIDC/Keycloak requests",
+    )
+
     # Default client credentials (can be overridden per-command)
     client_id: str | None = Field(
         default="celine-cli",

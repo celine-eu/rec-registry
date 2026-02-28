@@ -40,6 +40,7 @@ async def _get_token_from_client_credentials(
     client_id: str,
     client_secret: str,
     scope: str | None = None,
+    verify_ssl: bool = True,
 ) -> str:
     """Get access token using client credentials flow."""
     provider = OidcClientCredentialsProvider(
@@ -47,6 +48,7 @@ async def _get_token_from_client_credentials(
         client_id=client_id,
         client_secret=client_secret,
         scope=scope,
+        verify_ssl=verify_ssl,
     )
 
     access_token = await provider.get_token()
@@ -94,6 +96,7 @@ def _resolve_auth(
     password: str | None,
     auth_url: str,
     scope: str | None = None,
+    verify_ssl: bool = True,
 ) -> str:
     """Resolve authentication and return access token.
 
@@ -114,6 +117,7 @@ def _resolve_auth(
                 client_id=client_id,
                 client_secret=client_secret,
                 scope=scope,
+                verify_ssl=verify_ssl,
             )
         )
 
@@ -310,6 +314,7 @@ def import_bundle(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     yaml_text = file.read_text(encoding="utf-8")
@@ -447,6 +452,7 @@ def export_bundle(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     url = _api_url(api, "/admin/export")
@@ -562,6 +568,7 @@ def list_communities(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     url = _api_url(api, "/admin/communities")  # Use admin endpoint for listing
@@ -667,6 +674,7 @@ def community_tree(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -822,6 +830,7 @@ def lookup_user(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     url = _api_url(api, f"/admin/lookup/member-by-user-id/{user_id}")
@@ -918,6 +927,7 @@ def lookup_sensor(
         password=password,
         auth_url=auth_url,
         scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
     )
 
     url = _api_url(api, f"/admin/lookup/asset-by-sensor-id/{sensor_id}")
