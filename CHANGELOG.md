@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v1.3.1 (2026-03-02)
+
+### Bug Fixes
+
+- Upgrade sdk with new methods
+  ([`4200783`](https://github.com/celine-eu/rec-registry/commit/42007839b6897a8df3ec3c6f9940dac0d064d86d))
+
+- Use get_username() not sub for identifier
+  ([`4f68d5b`](https://github.com/celine-eu/rec-registry/commit/4f68d5b62ed209fbce8df37cff59220b2cb6edb3))
+
+### Chores
+
+- Rm dumpster cli
+  ([`cca3f65`](https://github.com/celine-eu/rec-registry/commit/cca3f6510da39193cdbb45627db54e54aea9e4fe))
+
+
 ## v1.3.0 (2026-02-28)
 
 ### Features
