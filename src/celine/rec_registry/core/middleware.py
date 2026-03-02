@@ -199,7 +199,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID", "unknown")
 
         # Build resource attributes
-        resource_attributes = {"user_sub": user.sub}
+        resource_attributes = {"user_sub": user.get_username()}
         if user.email:
             resource_attributes["user_email"] = user.email
 
@@ -218,7 +218,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         # Build policy input
         policy_input = PolicyInput(
             subject=Subject(
-                id=user.sub,
+                id=user.get_username(),
                 type=SubjectType.USER,
                 groups=groups,
                 scopes=scopes,

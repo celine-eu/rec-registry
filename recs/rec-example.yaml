@@ -69,7 +69,7 @@ community:
 
 members:
   ah-00001:
-    user_id: "00000000-0000-0000-0000-000000000001"
+    user_id: "ah-00001"
     name: Participant AH-00001
     role: consumer
     area: northern
@@ -93,7 +93,7 @@ members:
             measures: []
 
   ah-00002:
-    user_id: "00000000-0000-0000-0000-000000000002"
+    user_id: "ah-00002"
     name: Participant AH-00002
     role: prosumer
     area: northern
@@ -125,7 +125,7 @@ members:
               - pv-ah-00002
 
   ah-00003:
-    user_id: "00000000-0000-0000-0000-000000000003"
+    user_id: "ah-00003"
     name: Participant AH-00003
     role: prosumer
     area: central
@@ -167,7 +167,7 @@ members:
               - storage-ah-00003
 
   ah-00004:
-    user_id: "00000000-0000-0000-0000-000000000004"
+    user_id: "ah-00004"
     name: Participant AH-00004
     role: prosumer
     area: central
@@ -209,7 +209,7 @@ members:
               - storage-ah-00004
 
   ah-00005:
-    user_id: "00000000-0000-0000-0000-000000000005"
+    user_id: "ah-00005"
     name: Participant AH-00005
     role: prosumer
     area: northern
@@ -241,7 +241,7 @@ members:
               - pv-ah-00005
 
   ah-00006:
-    user_id: "00000000-0000-0000-0000-000000000006"
+    user_id: "ah-00006"
     name: Participant AH-00006
     role: prosumer
     area: northern
@@ -273,7 +273,7 @@ members:
               - pv-ah-00006
 
   ah-00007:
-    user_id: "00000000-0000-0000-0000-000000000007"
+    user_id: "ah-00007"
     name: Participant AH-00007
     role: prosumer
     area: northern
@@ -305,7 +305,7 @@ members:
               - pv-ah-00007
 
   ah-00008:
-    user_id: "00000000-0000-0000-0000-000000000008"
+    user_id: "ah-00008"
     name: Participant AH-00008
     role: prosumer
     area: northern
@@ -337,7 +337,7 @@ members:
               - pv-ah-00008
 
   ah-00009:
-    user_id: "00000000-0000-0000-0000-000000000009"
+    user_id: "ah-00009"
     name: Participant AH-00009
     role: consumer
     area: northern
@@ -361,7 +361,7 @@ members:
             measures: []
 
   ah-00010:
-    user_id: "00000000-0000-0000-0000-000000000010"
+    user_id: "ah-00010"
     name: Participant AH-00010
     role: prosumer
     area: central
@@ -393,7 +393,7 @@ members:
               - pv-ah-00010
 
   ah-00011:
-    user_id: "00000000-0000-0000-0000-000000000011"
+    user_id: "ah-00011"
     name: Participant AH-00011
     role: prosumer
     area: northern
@@ -435,7 +435,7 @@ members:
               - storage-ah-00011
 
   ah-00012:
-    user_id: "00000000-0000-0000-0000-000000000012"
+    user_id: "ah-00012"
     name: Participant AH-00012
     role: prosumer
     area: central
@@ -467,7 +467,7 @@ members:
               - pv-ah-00012
 
   ah-00013:
-    user_id: "00000000-0000-0000-0000-000000000013"
+    user_id: "ah-00013"
     name: Participant AH-00013
     role: prosumer
     area: northern
@@ -499,7 +499,7 @@ members:
               - pv-ah-00013
 
   ah-00014:
-    user_id: "00000000-0000-0000-0000-000000000014"
+    user_id: "ah-00014"
     name: Participant AH-00014
     role: prosumer
     area: southern
@@ -531,7 +531,7 @@ members:
               - pv-ah-00014
 
   ah-00015:
-    user_id: "00000000-0000-0000-0000-000000000015"
+    user_id: "ah-00015"
     name: Participant AH-00015
     role: prosumer
     area: northern
@@ -573,7 +573,7 @@ members:
               - storage-ah-00015
 
   ah-00016:
-    user_id: "00000000-0000-0000-0000-000000000016"
+    user_id: "ah-00016"
     name: Participant AH-00016
     role: consumer
     area: southern
@@ -597,7 +597,7 @@ members:
             measures: []
 
   ah-00017:
-    user_id: "00000000-0000-0000-0000-000000000017"
+    user_id: "ah-00017"
     name: Participant AH-00017
     role: consumer
     area: central

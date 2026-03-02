@@ -55,7 +55,7 @@ async def get_me(
     result = await session.execute(
         select(Member, Community)
         .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user.sub)
+        .where(Member.user_id == user.get_username())
     )
     row = result.first()
 
@@ -116,7 +116,9 @@ async def get_my_member(
 
     Note: Does not include user_id in response (user already knows it).
     """
-    member = await session.scalar(select(Member).where(Member.user_id == user.sub))
+    member = await session.scalar(
+        select(Member).where(Member.user_id == user.get_username())
+    )
 
     if member is None:
         raise HTTPException(
@@ -152,7 +154,7 @@ async def get_my_community(
     result = await session.execute(
         select(Member, Community)
         .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user.sub)
+        .where(Member.user_id == user.get_username())
     )
     row = result.first()
 
@@ -192,7 +194,9 @@ async def get_my_assets(
 
     Note: Does not include owner info (user already knows it's theirs).
     """
-    member = await session.scalar(select(Member).where(Member.user_id == user.sub))
+    member = await session.scalar(
+        select(Member).where(Member.user_id == user.get_username())
+    )
 
     if member is None:
         raise HTTPException(
@@ -233,7 +237,9 @@ async def get_my_asset(
     """
     Get a specific asset owned by the current user.
     """
-    member = await session.scalar(select(Member).where(Member.user_id == user.sub))
+    member = await session.scalar(
+        select(Member).where(Member.user_id == user.get_username())
+    )
 
     if member is None:
         raise HTTPException(
@@ -274,7 +280,9 @@ async def get_my_delivery_points(
     """
     Get current user's delivery points.
     """
-    member = await session.scalar(select(Member).where(Member.user_id == user.sub))
+    member = await session.scalar(
+        select(Member).where(Member.user_id == user.get_username())
+    )
 
     if member is None:
         raise HTTPException(
