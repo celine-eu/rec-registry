@@ -119,7 +119,7 @@ wheels = [
 
 [[package]]
 name = "celine-rec-registry"
-version = "1.3.1"
+version = "1.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

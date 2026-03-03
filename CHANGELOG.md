@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.2 (2026-03-03)
+
+### Bug Fixes
+
+- Expose envvar
+  ([`5ff6435`](https://github.com/celine-eu/rec-registry/commit/5ff643513b3bcb27aadb1e3ce53052d7a1f428a5))
+
+
 ## v1.3.1 (2026-03-02)
 
 ### Bug Fixes
