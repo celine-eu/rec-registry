@@ -233,6 +233,7 @@ def import_bundle(
         settings.base_url,
         "--api",
         help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
     ),
     dry_run: bool = typer.Option(
         False,
