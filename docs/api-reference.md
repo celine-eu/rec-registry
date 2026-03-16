@@ -79,7 +79,7 @@ Export the full community graph as a YAML bundle.
 **Query params:**
 - `community` (required) — community key to export
 
-**Response:** `application/yaml` — v0.4 bundle format (see [import-export.md](https://celine-eu.github.io/projects/rec-registry/docs/import-export.md)).
+**Response:** `application/yaml` — v0.4 bundle format (see [import / export](https://celine-eu.github.io/projects/rec-registry/docs/import-export)) section.
 
 ### `GET /admin/import`
 

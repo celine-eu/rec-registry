@@ -1,4 +1,4 @@
-# rec-registry
+# REC Registry
 
 Read-only JSON-LD API for REC (Renewable Energy Community) composition. Exposes communities, participants, memberships, sites, assets, and meters following DCAT-AP conventions and the CELINE ontology.
 
@@ -38,10 +38,10 @@ uvicorn celine_registry.main:app --reload --host 0.0.0.0 --port 8000
 
 | Document | Description |
 |---|---|
-| [Data Model](https://celine-eu.github.io/projects/rec-registry/docs/data-model.md) | Community, Member, Asset schema; JSONB fields; relationships |
-| [API Reference](https://celine-eu.github.io/projects/rec-registry/docs/api-reference.md) | All endpoint groups, query params, output formats |
-| [Import & Export](https://celine-eu.github.io/projects/rec-registry/docs/import-export.md) | Bundle format, replace semantics, idempotency |
-| [Development](https://celine-eu.github.io/projects/rec-registry/docs/development.md) | DATABASE_URL, Alembic migrations, local dev, testing |
+| [Data Model](https://celine-eu.github.io/projects/rec-registry/docs/data-model) | Community, Member, Asset schema; JSONB fields; relationships |
+| [API Reference](https://celine-eu.github.io/projects/rec-registry/docs/api-reference) | All endpoint groups, query params, output formats |
+| [Import & Export](https://celine-eu.github.io/projects/rec-registry/docs/import-export) | Bundle format, replace semantics, idempotency |
+| [Development](https://celine-eu.github.io/projects/rec-registry/docs/development) | DATABASE_URL, Alembic migrations, local dev, testing |
 
 ## License
 
