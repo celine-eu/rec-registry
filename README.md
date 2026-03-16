@@ -1,4 +1,4 @@
-# REC Registry
+# CELINE REC Registry
 
 Read-only JSON-LD API for REC (Renewable Energy Community) composition. Exposes communities, participants, memberships, sites, assets, and meters following DCAT-AP conventions and the CELINE ontology.
 
