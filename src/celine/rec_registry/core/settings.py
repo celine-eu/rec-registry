@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = (
-        "postgresql+asyncpg://postgres:securepassword123@172.17.0.1:15432/celine_rec_registry"
+        "postgresql+asyncpg://postgres:securepassword123@host.docker.internal:15432/celine_rec_registry"
     )
     database_echo: bool = False
 
