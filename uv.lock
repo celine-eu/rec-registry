@@ -148,7 +148,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "asyncpg", specifier = ">=0.29" },
-    { name = "celine-sdk", specifier = ">=1.4.1" },
+    { name = "celine-sdk", specifier = ">=1.4.3" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
@@ -180,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "celine-sdk"
-version = "1.4.1"
+version = "1.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiomqtt" },
@@ -195,9 +195,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/b0/d89c6961cabfe52178f4e9938ae7bdd70b2a86f1f77a3f3c431f9d2bbd06/celine_sdk-1.4.1.tar.gz", hash = "sha256:d5f65e198fc74d8d0765adb9a285a2f11b9ac1e563a541cb1b7bc2b1a739574a", size = 144569, upload-time = "2026-03-02T08:48:52.897Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/58/47ae0a0d8add10236b9bd30ac00868b643f0c363a1c554c7ae78a429cce6/celine_sdk-1.4.3.tar.gz", hash = "sha256:1c17e5d82fca4979b8ef8d228ff36163aa18171570fb624c034e5e1acd7da9b0", size = 149572, upload-time = "2026-03-21T15:44:06.765Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/a4/e48812831e22f7cd8f0c8e50a2c5ee545570cc0775263b0cec015f145c43/celine_sdk-1.4.1-py3-none-any.whl", hash = "sha256:84fa1b364edae36f25ef2b65e245cc2f9384fae35287a8405ae3356fe0230a68", size = 379141, upload-time = "2026-03-02T08:48:50.863Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/ec/e3b71909756af98f453317130eb02253c4a4e18e1b35905e1a8fd86359ad/celine_sdk-1.4.3-py3-none-any.whl", hash = "sha256:0dceae862c3d8e8c59c7e665c39f4c35ec31327ffb39c85336eac475718ebd73", size = 393078, upload-time = "2026-03-21T15:44:05.052Z" },
 ]
 
 [[package]]
