@@ -107,7 +107,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # /me* paths - require valid JWT
-        if path.startswith("/me"):
+        if path.startswith("/me") or path.startswith("/user"):
             user = await self._extract_user(request)
             if user is None:
                 return JSONResponse(
