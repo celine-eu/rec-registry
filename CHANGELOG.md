@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.3.3 (2026-03-23)
+
+### Bug Fixes
+
+- Handle user path for user jwt
+  ([`af39977`](https://github.com/celine-eu/rec-registry/commit/af399778e677cb7702786d5ca2030de3c3827575))
+
+### Chores
+
+- Upgrade celine-sdk to 1.4.3
+  ([`39b76b5`](https://github.com/celine-eu/rec-registry/commit/39b76b5df1b5144b8e2a554abebcb3778908beb2))
+
+
 ## v1.3.2 (2026-03-03)
 
 ### Bug Fixes
