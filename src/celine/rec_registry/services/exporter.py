@@ -45,13 +45,11 @@ async def export_community_bundle(
     if community is None:
         raise KeyError(f"Community not found: {community_key}")
 
-    # Build areas dict
+    # Build areas dict — pass through all stored fields (location, geometry, metadata)
     areas = {}
     for area_key, area_data in (community.areas or {}).items():
-        areas[area_key] = {
-            "name": area_data.get("name", area_key),
-            "location": area_data.get("location", {"lat": 0, "lon": 0}),
-        }
+        areas[area_key] = dict(area_data)
+        areas[area_key].setdefault("name", area_key)
 
     # Build community section
     community_dict: dict[str, Any] = {

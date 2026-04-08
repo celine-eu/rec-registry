@@ -38,6 +38,12 @@ community:
       location:
         lat: 45.9447
         lon: 11.2686
+      # geometry: # optional — full polygon from DSO dataset
+      #   type: Polygon
+      #   coordinates: [[[12.530, 41.884], ...]]
+      # # custom metadata
+      # cod_ac: AC000A00001
+      # rag_soc: "DSO SPA"
 
     central:
       name: central

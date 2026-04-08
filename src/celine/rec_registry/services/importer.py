@@ -117,10 +117,15 @@ async def replacement_import_bundle(
     # Build areas dict
     areas_dict = {}
     for area_key, area in bundle.community.areas.items():
-        areas_dict[area_key] = {
-            "name": area.name,
-            "location": {"lat": area.location.lat, "lon": area.location.lon},
-        }
+        area_dict: dict[str, Any] = {"name": area.name}
+        if area.location is not None:
+            area_dict["location"] = {"lat": area.location.lat, "lon": area.location.lon}
+        if area.geometry is not None:
+            area_dict["geometry"] = area.geometry
+        # Preserve any extra metadata fields (e.g. cod_ac, rag_soc)
+        extra = _extract_extra(area, {"name", "location", "geometry"})
+        area_dict.update(extra)
+        areas_dict[area_key] = area_dict
 
     # Build topology list
     topology_list = []

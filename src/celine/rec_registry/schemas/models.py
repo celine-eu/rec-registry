@@ -42,7 +42,8 @@ class Location(BaseModel):
 
 class Area(BaseModel):
     name: str
-    location: Location
+    location: Location | None = None
+    geometry: dict[str, Any] | None = None  # GeoJSON geometry (Point, Polygon, MultiPolygon, …)
 
 
 class TopologyNode(BaseModel):

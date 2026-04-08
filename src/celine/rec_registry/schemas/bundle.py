@@ -30,7 +30,8 @@ class AreaIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
-    location: LocationIn
+    location: LocationIn | None = None
+    geometry: dict | None = None  # GeoJSON geometry (Point, Polygon, MultiPolygon, …)
 
 
 # =============================================================================
