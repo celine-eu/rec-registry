@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v1.3.4 (2026-04-08)
+
+### Bug Fixes
+
+- Support for areas geometry and metadata
+  ([`fd7566b`](https://github.com/celine-eu/rec-registry/commit/fd7566b0f469afcfe39896c2c937b04bf84471a9))
+
+### Chores
+
+- Upgrade celine-sdk to 1.5.0
+  ([`60cc769`](https://github.com/celine-eu/rec-registry/commit/60cc76971ab63775b32b618ffeca58f913e0d7d1))
+
+- Upgrade celine-sdk to 1.6.0
+  ([`0697477`](https://github.com/celine-eu/rec-registry/commit/06974771e4cf687fb29fedc990a4efb443192d91))
+
+- **deps**: Bump the runtime-dependencies group across 1 directory with 3 updates
+  ([`6130168`](https://github.com/celine-eu/rec-registry/commit/61301681744d2b8e706dcb29dbbc9cd4ab63d263))
+
+- **deps-dev**: Bump debugpy
+  ([`9d0bdb4`](https://github.com/celine-eu/rec-registry/commit/9d0bdb4c507276cde17971b469eebc78914f9909))
+
+### Continuous Integration
+
+- Bump the actions group across 1 directory with 3 updates
+  ([`52f15bd`](https://github.com/celine-eu/rec-registry/commit/52f15bdfad487f24cc2806fafedaf67db7aaaa6f))
+
+
 ## v1.3.3 (2026-03-23)
 
 ### Bug Fixes
