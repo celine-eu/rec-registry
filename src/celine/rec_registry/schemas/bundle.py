@@ -45,7 +45,7 @@ class TopologyNodeIn(BaseModel):
     id: str
     type: str  # primary_substation, secondary_substation, transformer, feeder
     name: str | None = None
-    operator: str | None = None
+    operator_id: str | None = None
     parent: str | None = None
     area: dict | None = None  # GeoJSON geometry
 
@@ -265,6 +265,7 @@ class MemberIn(BaseModel):
 
     user_id: str
     name: str
+    type: str | None = None  # schema.org type CURIE: schema:Person, schema:GovernmentOrganization, schema:LocalBusiness, schema:Organization, …
     role: str  # consumer, prosumer, producer, operator, admin
     area: str  # reference to community area key
     status: str  # pending, active, suspended, inactive

@@ -40,7 +40,11 @@ dev = [
     "python-semantic-release>=10.5.3",
     "debugpy>=1.8.16",
     "pytest>=8.4.2",
+    "pytest-asyncio>=0.23",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]

@@ -1,5 +1,5 @@
 version: "1.0"
-schema_version: "1.0"
+schema_version: "0.5"
 
 metadata:
   created: "2024-01-15"
@@ -32,51 +32,56 @@ community:
     timezone: "Europe/Rome"
     currency: "EUR"
 
+  operators:
+    example-dso:
+      name: Example Distribution Network Operator
+      country: IT
+
   areas:
     northern:
       name: northern
-      location:
-        lat: 45.9447
-        lon: 11.2686
-      # geometry: # optional — full polygon from DSO dataset
-      #   type: Polygon
-      #   coordinates: [[[12.530, 41.884], ...]]
-      # # custom metadata
-      # cod_ac: AC000A00001
-      # rag_soc: "DSO SPA"
+      topology:
+        - "SS-northern-001"
 
     central:
       name: central
-      location:
-        lat: 45.9167
-        lon: 11.1667
+      topology:
+        - "SS-central-001"
 
     southern:
       name: southern
-      location:
-        lat: 45.9333
-        lon: 11.3167
+      topology:
+        - "SS-southern-001"
 
   topology:
     - id: "PS-northern-001"
       type: primary_substation
       name: "Primary Substation northern"
-      operator: "your DSO"
+      operator_id: example-dso
+
+    - id: "SS-northern-001"
+      type: secondary_substation
+      name: "Secondary Substation northern"
+      parent: "PS-northern-001"
+      operator_id: example-dso
 
     - id: "SS-central-001"
       type: secondary_substation
       name: "Secondary Substation central"
       parent: "PS-northern-001"
+      operator_id: example-dso
 
     - id: "SS-southern-001"
       type: secondary_substation
       name: "Secondary Substation southern"
       parent: "PS-northern-001"
+      operator_id: example-dso
 
 members:
   ah-00001:
     user_id: "ah-00001"
     name: Participant AH-00001
+    type: "schema:Person"
     role: consumer
     area: northern
     status: active
@@ -101,6 +106,7 @@ members:
   ah-00002:
     user_id: "ah-00002"
     name: Participant AH-00002
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -133,6 +139,7 @@ members:
   ah-00003:
     user_id: "ah-00003"
     name: Participant AH-00003
+    type: "schema:Person"
     role: prosumer
     area: central
     status: active
@@ -175,6 +182,7 @@ members:
   ah-00004:
     user_id: "ah-00004"
     name: Participant AH-00004
+    type: "schema:GovernmentOrganization"
     role: prosumer
     area: central
     status: active
@@ -217,6 +225,7 @@ members:
   ah-00005:
     user_id: "ah-00005"
     name: Participant AH-00005
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -249,6 +258,7 @@ members:
   ah-00006:
     user_id: "ah-00006"
     name: Participant AH-00006
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -281,6 +291,7 @@ members:
   ah-00007:
     user_id: "ah-00007"
     name: Participant AH-00007
+    type: "schema:GovernmentOrganization"
     role: prosumer
     area: northern
     status: active
@@ -313,6 +324,7 @@ members:
   ah-00008:
     user_id: "ah-00008"
     name: Participant AH-00008
+    type: "schema:LocalBusiness"
     role: prosumer
     area: northern
     status: active
@@ -345,6 +357,7 @@ members:
   ah-00009:
     user_id: "ah-00009"
     name: Participant AH-00009
+    type: "schema:Person"
     role: consumer
     area: northern
     status: active
@@ -369,6 +382,7 @@ members:
   ah-00010:
     user_id: "ah-00010"
     name: Participant AH-00010
+    type: "schema:GovernmentOrganization"
     role: prosumer
     area: central
     status: active
@@ -401,6 +415,7 @@ members:
   ah-00011:
     user_id: "ah-00011"
     name: Participant AH-00011
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -443,6 +458,7 @@ members:
   ah-00012:
     user_id: "ah-00012"
     name: Participant AH-00012
+    type: "schema:Person"
     role: prosumer
     area: central
     status: active
@@ -475,6 +491,7 @@ members:
   ah-00013:
     user_id: "ah-00013"
     name: Participant AH-00013
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -507,6 +524,7 @@ members:
   ah-00014:
     user_id: "ah-00014"
     name: Participant AH-00014
+    type: "schema:GovernmentOrganization"
     role: prosumer
     area: southern
     status: active
@@ -539,6 +557,7 @@ members:
   ah-00015:
     user_id: "ah-00015"
     name: Participant AH-00015
+    type: "schema:Person"
     role: prosumer
     area: northern
     status: active
@@ -581,6 +600,7 @@ members:
   ah-00016:
     user_id: "ah-00016"
     name: Participant AH-00016
+    type: "schema:Person"
     role: consumer
     area: southern
     status: active
@@ -605,6 +625,7 @@ members:
   ah-00017:
     user_id: "ah-00017"
     name: Participant AH-00017
+    type: "schema:LocalBusiness"
     role: consumer
     area: central
     status: active

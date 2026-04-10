@@ -133,8 +133,8 @@ async def replacement_import_bundle(
         node_dict = {"id": node.id, "type": node.type}
         if node.name:
             node_dict["name"] = node.name
-        if node.operator:
-            node_dict["operator"] = node.operator
+        if node.operator_id:
+            node_dict["operator_id"] = node.operator_id
         if node.parent:
             node_dict["parent"] = node.parent
         if node.area:
