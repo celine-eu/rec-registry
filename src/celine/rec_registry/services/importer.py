@@ -118,12 +118,14 @@ async def replacement_import_bundle(
     areas_dict = {}
     for area_key, area in bundle.community.areas.items():
         area_dict: dict[str, Any] = {"name": area.name}
+        if area.topology:
+            area_dict["topology"] = list(area.topology)
         if area.location is not None:
             area_dict["location"] = {"lat": area.location.lat, "lon": area.location.lon}
         if area.geometry is not None:
             area_dict["geometry"] = area.geometry
         # Preserve any extra metadata fields (e.g. cod_ac, rag_soc)
-        extra = _extract_extra(area, {"name", "location", "geometry"})
+        extra = _extract_extra(area, {"name", "topology", "location", "geometry"})
         area_dict.update(extra)
         areas_dict[area_key] = area_dict
 
@@ -141,6 +143,18 @@ async def replacement_import_bundle(
             node_dict["area"] = node.area
         topology_list.append(node_dict)
 
+    # Build operators dict (stored in extra — no dedicated DB column)
+    operators_dict: dict[str, Any] = {}
+    for op_key, op in bundle.community.operators.items():
+        op_dict: dict[str, Any] = {"name": op.name}
+        if op.country:
+            op_dict["country"] = op.country
+        if op.contact:
+            op_dict["contact"] = op.contact
+        extra_op = _extract_extra(op, {"name", "country", "contact"})
+        op_dict.update(extra_op)
+        operators_dict[op_key] = op_dict
+
     # Create community
     community = Community(
         key=community_key,
@@ -152,20 +166,24 @@ async def replacement_import_bundle(
         links=_to_dict(bundle.community.links),
         contact=_to_dict(bundle.community.contact),
         settings=_to_dict(bundle.community.settings),
-        extra=_extract_extra(
-            bundle.community,
-            {
-                "id",
-                "name",
-                "description",
-                "areas",
-                "topology",
-                "legal",
-                "links",
-                "contact",
-                "settings",
-            },
-        ),
+        extra={
+            **({"operators": operators_dict} if operators_dict else {}),
+            **_extract_extra(
+                bundle.community,
+                {
+                    "id",
+                    "name",
+                    "description",
+                    "areas",
+                    "topology",
+                    "legal",
+                    "links",
+                    "contact",
+                    "settings",
+                    "operators",
+                },
+            ),
+        },
     )
     session.add(community)
     await session.flush()
@@ -196,10 +214,13 @@ async def replacement_import_bundle(
             area=member_data.area,
             status=member_data.status,
             delivery_points=delivery_points_list,
-            extra=_extract_extra(
-                member_data,
-                {"user_id", "name", "role", "area", "status", "delivery_points", "assets"},
-            ),
+            extra={
+                **({"type": member_data.type} if member_data.type else {}),
+                **_extract_extra(
+                    member_data,
+                    {"user_id", "name", "type", "role", "area", "status", "delivery_points", "assets"},
+                ),
+            },
         )
         session.add(member)
         member_by_key[member_key] = member

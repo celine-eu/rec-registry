@@ -320,24 +320,32 @@ def import_bundle(
 
     yaml_text = file.read_text(encoding="utf-8")
 
+    # Validate YAML locally before sending
     try:
-        bundle = yaml.safe_load(yaml_text) or {}
+        docs = list(yaml.safe_load_all(yaml_text))
+        docs = [d for d in docs if d is not None]
     except yaml.YAMLError as e:
         typer.secho(f"Invalid YAML: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    if not isinstance(bundle, dict):
-        typer.secho(
-            "Top-level YAML must be a mapping/object", fg=typer.colors.RED, err=True
-        )
+    if not docs:
+        typer.secho("No YAML documents found in file", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    url = _api_url(api, "/admin/import")
-    payload = {"bundle": bundle, "dry_run": dry_run}
-    headers = {"Authorization": f"Bearer {access_token}"}
+    url = _api_url(api, "/admin/import/yaml")
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/yaml",
+    }
 
     try:
-        r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
+        r = httpx.post(
+            url,
+            content=yaml_text.encode("utf-8"),
+            params={"dry_run": str(dry_run).lower()},
+            headers=headers,
+            timeout=timeout,
+        )
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -350,22 +358,23 @@ def import_bundle(
         )
         raise typer.Exit(1)
 
-    report = r.json()
+    result = r.json()
+    reports = result.get("reports", [])
 
     if dry_run:
         typer.secho("Dry run completed (no changes made)", fg=typer.colors.YELLOW)
     else:
         typer.secho("Import completed successfully", fg=typer.colors.GREEN)
 
-    typer.echo(f"Community: {report.get('community_key')}")
-    typer.echo(f"Deleted: {report.get('deleted')}")
-    typer.echo(f"Inserted: {report.get('inserted')}")
-
-    warnings = report.get("warnings", [])
-    if warnings:
-        typer.secho(f"\nWarnings ({len(warnings)}):", fg=typer.colors.YELLOW)
-        for w in warnings:
-            typer.echo(f"  - {w}")
+    for report in reports:
+        typer.echo(f"Community: {report.get('community_key')}")
+        typer.echo(f"  Deleted: {report.get('deleted')}")
+        typer.echo(f"  Inserted: {report.get('inserted')}")
+        warnings = report.get("warnings", [])
+        if warnings:
+            typer.secho(f"  Warnings ({len(warnings)}):", fg=typer.colors.YELLOW)
+            for w in warnings:
+                typer.echo(f"    - {w}")
 
 
 # =============================================================================
@@ -375,11 +384,11 @@ def import_bundle(
 
 @app.command("export")
 def export_bundle(
-    community: str = typer.Option(
-        ...,
+    community: list[str] | None = typer.Option(
+        None,
         "--community",
         "-c",
-        help="Community key to export",
+        help="Community key to export (repeat for multiple; omit to export all)",
     ),
     output: Path | None = typer.Option(
         None,
@@ -441,7 +450,11 @@ def export_bundle(
     ),
 ):
     """
-    Export a community to v0.4 YAML format.
+    Export one or more communities to YAML format.
+
+    Pass --community once per key to export specific communities.
+    Omit --community entirely to export all communities.
+    Multiple communities are returned as a multidocument YAML (--- separated).
 
     Requires admin authentication.
     """
@@ -458,11 +471,10 @@ def export_bundle(
 
     url = _api_url(api, "/admin/export")
     headers = {"Authorization": f"Bearer {access_token}"}
+    params = [("community", key) for key in community] if community else []
 
     try:
-        r = httpx.get(
-            url, params={"community": community}, headers=headers, timeout=timeout
-        )
+        r = httpx.get(url, params=params, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)

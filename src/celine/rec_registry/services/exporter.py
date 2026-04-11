@@ -73,6 +73,11 @@ async def export_community_bundle(
     if community.settings:
         community_dict["settings"] = community.settings
 
+    # operators stored in extra (no dedicated DB column)
+    operators = (community.extra or {}).get("operators")
+    if operators:
+        community_dict["operators"] = operators
+
     community_dict["areas"] = areas
 
     # Add topology if present
@@ -84,13 +89,16 @@ async def export_community_bundle(
     for member in sorted(community.members, key=lambda m: m.key):
         member_assets = _build_asset_collection(member.assets)
 
-        member_dict: dict[str, Any] = {
-            "user_id": member.user_id,
-            "name": member.name,
-            "role": member.role,
-            "area": member.area,
-            "status": member.status,
-        }
+        member_dict: dict[str, Any] = {"user_id": member.user_id, "name": member.name}
+
+        # type stored in extra (no dedicated DB column)
+        member_type = (member.extra or {}).get("type")
+        if member_type:
+            member_dict["type"] = member_type
+
+        member_dict["role"] = member.role
+        member_dict["area"] = member.area
+        member_dict["status"] = member.status
 
         # Add delivery_points if present
         if member.delivery_points:
@@ -99,9 +107,10 @@ async def export_community_bundle(
         # Add assets
         member_dict["assets"] = member_assets
 
-        # Add any extra fields
-        if member.extra:
-            member_dict.update(member.extra)
+        # Add any remaining extra fields (type already handled above)
+        remaining_member_extra = {k: v for k, v in (member.extra or {}).items() if k != "type"}
+        if remaining_member_extra:
+            member_dict.update(remaining_member_extra)
 
         members[member.key] = member_dict
 
@@ -127,9 +136,10 @@ async def export_community_bundle(
         "members": members,
     }
 
-    # Add community extra fields to bundle
-    if community.extra:
-        bundle["community"].update(community.extra)
+    # Add remaining extra fields to community (operators already handled above)
+    remaining_extra = {k: v for k, v in (community.extra or {}).items() if k != "operators"}
+    if remaining_extra:
+        bundle["community"].update(remaining_extra)
 
     return bundle
 

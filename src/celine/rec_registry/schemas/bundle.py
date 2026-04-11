@@ -30,8 +30,22 @@ class AreaIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
+    topology: list[str] = Field(default_factory=list)  # topology node IDs from community.topology
     location: LocationIn | None = None
     geometry: dict | None = None  # GeoJSON geometry (Point, Polygon, MultiPolygon, …)
+
+
+# =============================================================================
+# Operator
+# =============================================================================
+
+class OperatorIn(BaseModel):
+    """Grid operator (DSO) active in this community."""
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    country: str | None = None  # ISO 3166-1 alpha-2
+    contact: str | None = None  # email or URL
 
 
 # =============================================================================
@@ -288,6 +302,7 @@ class CommunityIn(BaseModel):
     links: LinksIn | None = None
     contact: ContactIn | None = None
     settings: SettingsIn | None = None
+    operators: dict[str, OperatorIn] = Field(default_factory=dict)
     areas: dict[str, AreaIn] = Field(default_factory=dict)
     topology: list[TopologyNodeIn] = Field(default_factory=list)
 
@@ -341,3 +356,9 @@ class ImportReport(BaseModel):
     deleted: dict[str, int] = Field(default_factory=dict)
     inserted: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+
+
+class MultiImportReport(BaseModel):
+    """Report for a bulk import of multiple bundles."""
+    reports: list[ImportReport]
+    dry_run: bool = False

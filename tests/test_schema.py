@@ -22,10 +22,9 @@ class TestBundleParsing:
         areas = example_bundle.community.areas
         assert set(areas.keys()) == {"northern", "central", "southern"}
 
-    def test_area_topology_preserved_as_extra(self, example_bundle):
+    def test_area_topology(self, example_bundle):
         northern = example_bundle.community.areas["northern"]
-        # topology is not a typed field on AreaIn; stored via extra="allow"
-        assert northern.model_extra.get("topology") == ["SS-northern-001"]
+        assert northern.topology == ["SS-northern-001"]
 
     def test_community_topology_nodes(self, example_bundle):
         topology = example_bundle.community.topology
@@ -35,9 +34,9 @@ class TestBundleParsing:
         assert "secondary_substation" in types
 
     def test_community_operator(self, example_bundle):
-        # operators falls into extra="allow" on CommunityIn
-        operators = example_bundle.community.model_extra.get("operators", {})
+        operators = example_bundle.community.operators
         assert "example-dso" in operators
+        assert operators["example-dso"].name == "Example Distribution Network Operator"
 
     def test_member_count(self, example_bundle):
         assert len(example_bundle.members) == 17
