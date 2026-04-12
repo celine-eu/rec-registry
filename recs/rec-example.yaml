@@ -41,17 +41,17 @@ community:
     northern:
       name: northern
       topology:
-        - "SS-northern-001"
+        - "AC221E00020"
 
     central:
       name: central
       topology:
-        - "SS-central-001"
+        - "AC221E00014"
 
     southern:
       name: southern
       topology:
-        - "SS-southern-001"
+        - "AC221E00017"
 
   topology:
     - id: "PS-northern-001"
@@ -59,19 +59,19 @@ community:
       name: "Primary Substation northern"
       operator_id: example-dso
 
-    - id: "SS-northern-001"
+    - id: "AC221E00020"
       type: secondary_substation
       name: "Secondary Substation northern"
       parent: "PS-northern-001"
       operator_id: example-dso
 
-    - id: "SS-central-001"
+    - id: "AC221E00014"
       type: secondary_substation
       name: "Secondary Substation central"
       parent: "PS-northern-001"
       operator_id: example-dso
 
-    - id: "SS-southern-001"
+    - id: "AC221E00017"
       type: secondary_substation
       name: "Secondary Substation southern"
       parent: "PS-northern-001"
