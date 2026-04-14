@@ -33,7 +33,7 @@ community:
     currency: "EUR"
 
   operators:
-    example-dso:
+    example_dso:
       name: Example Distribution Network Operator
       country: IT
 
