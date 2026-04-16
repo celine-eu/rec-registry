@@ -2,6 +2,42 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-04-16)
+
+### Bug Fixes
+
+- Update rec mappings
+  ([`65a4fb2`](https://github.com/celine-eu/rec-registry/commit/65a4fb2992e8aefa00190d020467b0076e85817a))
+
+### Chores
+
+- Add tests
+  ([`dc447cb`](https://github.com/celine-eu/rec-registry/commit/dc447cba60a2abd2d7250fa3ecd6412a421627d1))
+
+- Update example yaml
+  ([`ee3d331`](https://github.com/celine-eu/rec-registry/commit/ee3d3314c1e5583c6c0ef3eff6da2a65ee5cfc3f))
+
+- Upgrade celine-sdk to 1.10.0
+  ([`598032a`](https://github.com/celine-eu/rec-registry/commit/598032afed78f7dd9c65649b1fdf131721195af3))
+
+- Upgrade celine-sdk to 1.7.0
+  ([`00e538c`](https://github.com/celine-eu/rec-registry/commit/00e538cb0f28702574fa37acd23eb762a15283c6))
+
+- Upgrade celine-sdk to 1.8.0
+  ([`90b51c5`](https://github.com/celine-eu/rec-registry/commit/90b51c57792548fa358df55d335615da9f517efe))
+
+- Upgrade celine-sdk to 1.9.0
+  ([`ed67934`](https://github.com/celine-eu/rec-registry/commit/ed67934851412ce3d095a59cd5e4090d1b1ea175))
+
+### Features
+
+- Review import/export to support multiple REC. update to v0.5 schema
+  ([`04c389f`](https://github.com/celine-eu/rec-registry/commit/04c389ff8332a784f9d76b5c6707074a7a0dcb10))
+
+- Upgrade schema to v0.5
+  ([`c508886`](https://github.com/celine-eu/rec-registry/commit/c50888667cec520d29f4287778324534882cce11))
+
+
 ## v1.3.4 (2026-04-08)
 
 ### Bug Fixes
