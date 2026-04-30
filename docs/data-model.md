@@ -4,76 +4,71 @@
 
 ### Community
 
-A Renewable Energy Community (REC) is the top-level entity. It groups members, sites, and assets under a shared energy boundary.
+Top-level entity representing a Renewable Energy Community.
 
 | Field | Type | Description |
 |---|---|---|
-| `key` | `str` | Unique community identifier (e.g., `COMM1`) |
+| `key` | `str` | Unique community identifier (e.g., `example_rec`) |
 | `name` | `str` | Human-readable display name |
 | `description` | `str` | Optional free-text description |
-| `metadata` | `JSONB` | Extensible properties (GSE zone, regulatory context, etc.) |
-| `created_at` | `datetime` | Record creation timestamp |
+| `areas` | `JSONB` | Named areas, each with `name`, `topology` (list of node IDs), optional `location`/`geometry` |
+| `topology` | `JSONB` | Grid topology as a list of nodes (`id`, `type`, `name`, `operator_id`, children) |
+| `legal` | `JSONB` | Legal info: `name`, `vat`, `legal_form` |
+| `links` | `JSONB` | Public URLs: `website`, `logo`, `privacy_policy`, `terms` |
+| `contact` | `JSONB` | Contact info: `email`, `pec`, `phone` |
+| `settings` | `JSONB` | Operational settings: `timezone`, `currency` |
+| `extra` | `JSONB` | Extensible properties; `extra.operators` holds operator definitions |
 
 ### Member
 
-A participant belonging to a community. Members can be producers, consumers, or prosumers.
+A participant belonging to a community.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique member identifier |
-| `community_key` | `str` | Foreign key to Community |
+| `key` | `str` | Unique member identifier within the community |
+| `user_id` | `str` | Identity provider user ID |
 | `name` | `str` | Display name |
-| `role` | `str` | `producer`, `consumer`, or `prosumer` |
-| `metadata` | `JSONB` | Additional properties |
+| `role` | `str` | `consumer`, `prosumer`, `producer`, `operator`, or `admin` |
+| `area` | `str` | Reference to a community area key |
+| `status` | `str` | `pending`, `active`, `suspended`, or `inactive` |
+| `delivery_points` | `JSONB` | List of delivery point objects (`id`, `type`, `description`, `address`, `tariff`, `active`) |
+| `extra` | `JSONB` | Extensible properties; `extra.type` holds a schema.org CURIE |
 
 ### Asset
 
-A physical or virtual energy asset (meter, panel, battery, etc.) associated with a member.
+A physical or virtual energy asset associated with a member and community.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique asset identifier |
-| `member_id` | `str` | Foreign key to Member |
-| `asset_type` | `str` | Type classification (e.g., `pv`, `meter`, `battery`) |
-| `metadata` | `JSONB` | Asset-specific properties |
-
-### Site
-
-A physical location grouping assets. Optional intermediate layer between Member and Asset.
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | `str` | Unique site identifier |
-| `member_id` | `str` | Owning member |
-| `address` | `str` | Physical address |
-| `coordinates` | `JSONB` | Optional GeoJSON point |
-
-## JSONB Fields
-
-JSONB fields provide flexible extensibility without schema migrations. They are surfaced verbatim in API responses and stored as validated JSON. Common patterns:
-
-- `metadata.gse_zone` — GSE regulatory zone (Italian deployments)
-| - `metadata.boundary` — participant ID list for consumption boundaries
-- `metadata.capacity_kw` — installed capacity in kilowatts
+| `key` | `str` | Unique asset identifier within the community |
+| `asset_type` | `str` | `pv`, `storage`, `meter`, `ev_charger`, `heat_pump`, or `load` |
+| `name` | `str` | Display name |
+| `sensor_id` | `str?` | Optional sensor/meter identifier (promoted column for lookups) |
+| `properties` | `JSONB` | Type-specific properties (e.g., `capacity_kwp` for PV, `meter_type`/`pod` for meters) |
+| `device` | `JSONB` | SAREF-inspired device specification: `manufacturer`, `model`, `serial_number`, `firmware_version`, `type` |
+| `relationships` | `JSONB` | Asset relationships: `measures` (list of asset keys), `paired_with` (asset key) |
+| `extra` | `JSONB` | Extensible properties |
+| `community_id` | `FK` | Foreign key to Community |
+| `owner_id` | `FK` | Foreign key to Member |
 
 ## Relationships
 
 ```
 Community
-  └── Member (many)
-        └── Site (many, optional)
-              └── Asset (many)
+  +-- Member (many)
+  |     +-- Asset (many, via owner_id)
+  +-- Asset (many, via community_id)
 ```
 
-Assets without a site are attached directly to a Member.
+Assets belong to both a community and an owning member. There is no `Site` entity; assets attach directly to members.
 
-## IRI Convention
+## JSONB Conventions
 
-All entities are represented as expanded IRIs in JSON-LD responses using the CELINE ontology:
+JSONB fields provide flexible extensibility without schema migrations. They are stored as validated JSON and surfaced verbatim in API responses. Type-specific asset properties vary by `asset_type`:
 
-```
-https://celine-eu.github.io/ontologies/celine#Community
-https://data.celine.eu/communities/COMM1
-```
-
-No CURIE output is produced. The `@context` always references the remote context document.
+- **pv**: `capacity_kwp`, `orientation`, `tilt`, `installation_date`
+- **storage**: `capacity_kwh`, `max_power_kw`, `chemistry`
+- **meter**: `meter_type`, `pod`, `direction`
+- **ev_charger**: `max_power_kw`, `connector_type`, `num_connectors`, `smart_charging`
+- **heat_pump**: `thermal_power_kw`, `cop`, `heat_source`, `reversible`
+- **load**: `rated_power_kw`, `load_type`, `controllable`, `priority`

@@ -1,101 +1,182 @@
 # API Reference
 
-Interactive OpenAPI docs are available at `http://localhost:8000/docs`.
-
-## Output Formats
-
-All endpoints that return registry data support the `format` query parameter:
-
-| Value | Content-Type | Description |
-|---|---|---|
-| `json` (default) | `application/json` | Plain JSON object |
-| `jsonld` | `application/ld+json` | JSON-LD with `@context` reference |
-
-JSON-LD responses include `"@context": "https://celine-eu.github.io/ontologies/celine.jsonld"` and use expanded IRIs only.
+Interactive OpenAPI docs are available at `http://localhost:8004/docs`.
 
 ---
 
 ## User Routes
 
-Read-only endpoints for querying registry data.
+Self-service endpoints scoped to the authenticated user's membership. Prefix: `/user`.
 
-### `GET /user/communities`
+### `GET /user`
 
-List all communities.
+Profile summary: user info, community membership, asset counts by type.
 
-**Query params:**
-- `format` — output format (`json` or `jsonld`)
+### `GET /user/member`
 
-### `GET /user/communities/{key}`
+Own member detail (key, name, role, area, status, delivery points).
 
-Retrieve a single community by its key.
+### `GET /user/community`
 
-### `GET /user/communities/{key}/members`
-
-List all members of a community.
-
-**Query params:**
-- `role` — filter by member role (`producer`, `consumer`, `prosumer`)
-- `format` — output format
-
-### `GET /user/members/{id}`
-
-Retrieve a single member.
-
-### `GET /user/members/{id}/assets`
-
-List all assets belonging to a member.
-
-**Query params:**
-- `asset_type` — filter by asset type
+Detail of the community the user belongs to.
 
 ### `GET /user/assets`
 
-List all assets. Supports filtering:
+List own assets.
 
 **Query params:**
-- `community` — filter by community key
-- `member` — filter by member ID
-- `asset_type` — filter by asset type
+- `asset_type` — filter by asset type (`pv`, `meter`, `storage`, `ev_charger`, `heat_pump`, `load`)
 
-### `GET /user/sites`
+### `GET /user/assets/{asset_key}`
 
-List all sites. Supports filtering:
+Detail of a specific owned asset.
 
-**Query params:**
-- `community` — filter by community key
-- `member` — filter by member ID
+### `GET /user/delivery-points`
+
+List own delivery points.
 
 ---
 
-## Admin Routes
+## Admin Routes — Communities
 
-Endpoints for data management. Protected by the auth/ACL middleware seam (placeholder in current release).
+Community browsing and detail endpoints. Prefix: `/admin`.
 
-### `GET /admin/export`
+### `GET /admin/communities`
 
-Export the full community graph as a YAML bundle.
+Paginated list of communities.
 
 **Query params:**
-- `community` (required) — community key to export
+- `key` — filter by community key
+- `limit` — page size (default 50, max 500)
+- `cursor` — pagination cursor
 
-**Response:** `application/yaml` — v0.4 bundle format (see [import / export](https://celine-eu.github.io/projects/rec-registry/docs/import-export)) section.
+### `GET /admin/communities/{community_key}`
 
-### `GET /admin/import`
+Community detail including areas, topology, legal, contact, settings.
 
-Validate a YAML bundle without applying it.
+### `GET /admin/communities/{community_key}/topology`
 
-**Request:** `multipart/form-data` with `file` field containing the YAML bundle.
+Grid topology nodes for a community.
 
-**Response:** Validation result.
+### `GET /admin/communities/{community_key}/members`
+
+Paginated list of members.
+
+**Query params:**
+- `role` — filter by role (`consumer`, `prosumer`, `producer`, `operator`, `admin`)
+- `status` — filter by status (`pending`, `active`, `suspended`, `inactive`)
+- `area` — filter by area key
+- `limit`, `cursor` — pagination
+
+### `GET /admin/communities/{community_key}/members/{member_key}`
+
+Member detail.
+
+### `GET /admin/communities/{community_key}/members/by-user-id/{user_id}`
+
+Lookup member by user ID within a community.
+
+### `GET /admin/communities/{community_key}/members/{member_key}/delivery-points`
+
+Delivery points for a specific member.
+
+### `GET /admin/communities/{community_key}/delivery-points`
+
+Paginated list of all delivery points in a community.
+
+**Query params:**
+- `type` — filter by delivery point type
+- `active` — filter by active status
+- `limit`, `cursor` — pagination
+
+### `GET /admin/communities/{community_key}/delivery-points/by-id/{dp_id}`
+
+Lookup a specific delivery point by its ID.
+
+### `GET /admin/communities/{community_key}/assets`
+
+Paginated list of community assets.
+
+**Query params:**
+- `asset_type` — filter by type
+- `owner` — filter by member key
+- `limit`, `cursor` — pagination
+
+### `GET /admin/communities/{community_key}/assets/{asset_key}`
+
+Asset detail.
+
+### `GET /admin/communities/{community_key}/assets/by-sensor-id/{sensor_id}`
+
+Lookup asset by sensor ID within a community.
+
+### `GET /admin/communities/{community_key}/meters`
+
+Convenience endpoint listing meter-type assets with POD and meter type info.
+
+**Query params:**
+- `owner` — filter by member key
+- `limit`, `cursor` — pagination
+
+---
+
+## Admin Routes — Lookup
+
+Cross-community lookups. Prefix: `/admin/lookup`.
+
+### `GET /admin/lookup/community-by-user-id/{user_id}`
+
+Find which community a user belongs to.
+
+### `GET /admin/lookup/community-by-sensor-id/{sensor_id}`
+
+Find which community owns a given sensor.
+
+### `GET /admin/lookup/community-by-delivery-point/{dp_id}`
+
+Find which community a delivery point belongs to.
+
+### `GET /admin/lookup/member-by-user-id/{user_id}`
+
+Lookup member details by user ID across communities.
+
+### `GET /admin/lookup/asset-by-sensor-id/{sensor_id}`
+
+Lookup asset details by sensor ID across communities.
+
+### `POST /admin/lookup/assets-by-sensor-ids`
+
+Batch lookup: resolve multiple sensor IDs to assets in a single request.
+
+**Request body:** list of sensor ID strings.
+
+---
+
+## Admin Routes — Management
+
+Import/export operations. Prefix: `/admin`.
 
 ### `POST /admin/import`
 
-Replace the full community graph from a YAML bundle. Deletes the existing community and all related entities, then recreates from the bundle.
+Import a community from a JSON bundle. Full replace: deletes existing community graph and recreates from bundle. Atomic operation.
 
-**Request:** `multipart/form-data` with `file` field.
+**Request body:** JSON bundle (see [Import & Export](import-export.md)).
 
-**Response:** `201` on success.
+**Response:** `ImportReport` with created counts.
+
+### `POST /admin/import/yaml`
+
+Import one or more communities from a YAML multidocument body. Each document is a separate community bundle.
+
+**Request body:** `text/yaml` — multidocument YAML.
+
+**Response:** `MultiImportReport` with per-community results.
+
+### `GET /admin/export`
+
+Export communities as YAML multidocument.
+
+**Response:** `text/plain` — YAML bundle(s).
 
 ---
 
@@ -103,8 +184,8 @@ Replace the full community graph from a YAML bundle. Deletes the existing commun
 
 ### `GET /health`
 
-Health check endpoint. No authentication required. Returns `{"status": "ok"}`.
+Health check. Returns `{"status": "ok"}`.
 
-### `GET /.well-known/jsonld-context`
+### `GET /version`
 
-Redirects to the CELINE JSON-LD context document.
+Service version information.

@@ -2,56 +2,66 @@
 
 ## Prerequisites
 
-- Python ≥ 3.11
+- Python >= 3.12
 - PostgreSQL 14+
 - `uv` package manager
+- `task` (go-task)
 
 ## Environment Variables
 
-| Variable | Description | Example |
+| Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/celine_registry` |
-| `BASE_URL` | Public base URL of the service (used for IRI generation) | `http://localhost:8000` |
+| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://postgres:securepassword123@host.docker.internal:15432/celine_rec_registry` |
+| `DATABASE_ECHO` | Log SQL statements | `false` |
+| `BASE_URL` | Public base URL of the service | `http://api.celine.localhost/rec-registry` |
+| `DEFAULT_PAGE_SIZE` | Default pagination page size | `50` |
+| `MAX_PAGE_SIZE` | Maximum pagination page size | `500` |
+| `AUTH_ENABLED` | Enable JWT authentication | `true` |
+| `AUTH_HEADER_NAME` | HTTP header for auth token | `authorization` |
+| `OIDC__*` | OIDC settings (from `celine-sdk`) | audience: `svc-rec-registry` |
+| `POLICIES_ENABLED` | Enable OPA policy evaluation | `true` |
+| `POLICIES_DIR` | Directory containing `.rego` files | `./policies` |
+| `POLICIES_DATA_DIR` | Optional directory for policy data JSON | — |
+| `POLICIES_PACKAGE` | OPA package to evaluate | `celine.rec_registry.access` |
+| `POLICIES_CACHE_ENABLED` | Enable in-memory decision cache | `true` |
+| `POLICIES_CACHE_TTL` | Cache TTL in seconds | `300` |
 
 ## Local Setup
 
 ```bash
-# Install dependencies
 uv sync
 
-# Configure environment
-export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/celine_registry"
-export BASE_URL="http://localhost:8000"
-
 # Run migrations
-uv run alembic upgrade head
+task db:migrate
 
-# Start development server
-uv run uvicorn celine_registry.main:app --reload --host 0.0.0.0 --port 8000
+# Start development server (port 8004)
+task run
 ```
 
-## Docker Compose
+## Taskfile Commands
 
-```bash
-docker compose up -d
-```
-
-Starts PostgreSQL and the registry API. Apply migrations with:
-
-```bash
-docker compose run --rm api alembic upgrade head
-```
+| Command | Description |
+|---|---|
+| `task run` | Start dev server on port 8004 |
+| `task debug` | Start with debugger (port 48004) |
+| `task db:migrate` | Run `alembic upgrade head` |
+| `task db:revision` | Create new Alembic migration |
+| `task import:community -- --file <path>` | Import a community YAML bundle |
+| `task import:community:example` | Import the example community |
+| `task release` | Run semantic-release |
 
 ## Alembic Migrations
 
 ```bash
 # Apply pending migrations
-uv run alembic upgrade head
+task db:migrate
 
 # Create a new migration
-uv run alembic revision --autogenerate -m "add site table"
+task db:revision -- -m "add delivery points"
 
-# Downgrade one step
+# Or directly:
+uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "description"
 uv run alembic downgrade -1
 ```
 
@@ -61,21 +71,35 @@ uv run alembic downgrade -1
 uv run pytest -q
 ```
 
-Tests use a separate test database. Set `DATABASE_URL` to a test instance or use the Docker Compose test profile.
-
 ## Project Layout
 
 ```
-src/
-  celine_registry/
-    main.py           # FastAPI app factory
-    models.py         # SQLAlchemy ORM models
-    schemas.py        # Pydantic request/response schemas
-    routes/
-      user.py         # Read-only user endpoints
-      admin.py        # Import/export endpoints
-    jsonld.py         # JSON-LD serialization
-    bundle.py         # YAML bundle parser and validator
+src/celine/rec_registry/
+  main.py                    # FastAPI app factory (create_app)
+  db/
+    models.py                # SQLAlchemy ORM: Community, Member, Asset
+    session.py               # Async session management
+  schemas/
+    models.py                # Pydantic response schemas
+    bundle.py                # Bundle import schemas (v0.5)
+  api/
+    user.py                  # Self-service user endpoints
+    meta.py                  # Health, version
+    admin/
+      communities.py         # Community/member/asset browsing
+      lookup.py              # Cross-community lookups
+      management.py          # Import/export operations
+  services/
+    importer.py              # Bundle import logic
+    exporter.py              # YAML export logic
+  core/
+    settings.py              # Pydantic settings
+    middleware.py             # Auth/policy middleware
+    yaml_io.py               # YAML parsing utilities
+  cli/
+    main.py                  # CLI entry point (celine-rec-registry)
+    config.py                # CLI configuration
+policies/                    # OPA .rego policy files
 alembic/
-  versions/           # Migration scripts
+  versions/                  # Migration scripts
 ```

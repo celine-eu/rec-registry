@@ -1,47 +1,62 @@
 # CELINE REC Registry
 
-Read-only JSON-LD API for REC (Renewable Energy Community) composition. Exposes communities, participants, memberships, sites, assets, and meters following DCAT-AP conventions and the CELINE ontology.
+API for modelling Renewable Energy Communities (RECs). Manages communities, members, assets, delivery points, and grid topology. Provides self-service endpoints for participants and administrative endpoints for managers, with import/export of community bundles in YAML format.
 
 ## Features
 
-- DCAT-AP compatible responses
-- JSON-LD output with IRI expansion (no CURIEs)
-- `?format=json` (default) and `?format=jsonld` query parameter
-- JSON-LD context always references `https://celine-eu.github.io/ontologies/celine.jsonld`
-- Admin import/export with full replace semantics
-- Subleaf endpoints with query filters
-- Auth/ACL middleware seam on `/admin/*` and write methods
+- Multi-community support with v0.5 schema
+- Self-service user API (profile, membership, assets, delivery points)
+- Admin API for community management, cross-community lookup, and batch operations
+- YAML-based import/export with full replace semantics
+- In-process OPA policy evaluation for authorization
+- CLI (`celine-rec-registry`) for import, export, listing, and lookup operations
+- Paginated responses with cursor-based navigation
 
 ## Quick Start
 
 ```bash
-export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/celine_registry"
-export BASE_URL="http://localhost:8000"
+uv sync
 
-alembic upgrade head
-uvicorn celine_registry.main:app --reload --host 0.0.0.0 --port 8000
+export DATABASE_URL="postgresql+asyncpg://postgres:securepassword123@host.docker.internal:15432/celine_rec_registry"
+
+uv run alembic upgrade head
+# or: task db:migrate
+
+task run
+# runs on port 8004
 ```
 
 ## API Overview
 
 | Path prefix | Description |
 |---|---|
-| `GET /user/communities` | List all communities |
-| `GET /user/communities/{key}` | Community detail |
-| `GET /user/communities/{key}/members` | Members of a community |
-| `GET /user/assets` | List assets (filterable by community, member) |
-| `GET /admin/import` | Validate a YAML bundle |
-| `POST /admin/import` | Replace community graph from YAML bundle |
-| `GET /admin/export?community={key}` | Export full YAML bundle |
+| `GET /user` | Self-service: profile, membership, community, assets, delivery points |
+| `GET /admin/communities` | List/detail communities, members, assets, delivery points, meters |
+| `GET /admin/lookup/*` | Cross-community lookups by user ID, sensor ID, or delivery point |
+| `POST /admin/import` | Import community from JSON bundle |
+| `POST /admin/import/yaml` | Import communities from YAML multidocument |
+| `GET /admin/export` | Export communities as YAML |
+| `GET /health`, `GET /version` | Service health and version |
+
+## CLI
+
+```bash
+celine-rec-registry import --file recs/rec-example.yaml
+celine-rec-registry export --community example_rec
+celine-rec-registry list
+celine-rec-registry tree --community example_rec
+celine-rec-registry lookup-user --user-id <id>
+celine-rec-registry lookup-sensor --sensor-id <id>
+```
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [Data Model](https://celine-eu.github.io/projects/rec-registry/docs/data-model) | Community, Member, Asset schema; JSONB fields; relationships |
-| [API Reference](https://celine-eu.github.io/projects/rec-registry/docs/api-reference) | All endpoint groups, query params, output formats |
-| [Import & Export](https://celine-eu.github.io/projects/rec-registry/docs/import-export) | Bundle format, replace semantics, idempotency |
-| [Development](https://celine-eu.github.io/projects/rec-registry/docs/development) | DATABASE_URL, Alembic migrations, local dev, testing |
+| [Data Model](docs/data-model.md) | Community, Member, Asset schema; JSONB fields; relationships |
+| [API Reference](docs/api-reference.md) | All endpoint groups, query params, responses |
+| [Import & Export](docs/import-export.md) | Bundle format, replace semantics, CLI usage |
+| [Development](docs/development.md) | Setup, configuration, migrations, project layout |
 
 ## License
 
