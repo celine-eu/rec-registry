@@ -2,6 +2,56 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-07-02)
+
+### Bug Fixes
+
+- Externalize local settings
+  ([`d754c60`](https://github.com/celine-eu/rec-registry/commit/d754c602d7642988c6054f400a720fba94172b96))
+
+### Chores
+
+- Update docs
+  ([`21d5cf3`](https://github.com/celine-eu/rec-registry/commit/21d5cf323992d3a02ab616347ec132ab10df16c2))
+
+- Upgrade celine-sdk to 1.11.0
+  ([`9a38888`](https://github.com/celine-eu/rec-registry/commit/9a388884c54465ac04bf6edbe2afcd8b7336539f))
+
+- Upgrade celine-sdk to 1.12.0
+  ([`611d54c`](https://github.com/celine-eu/rec-registry/commit/611d54ce28c56af936a5d768f1f7c3642c5662a2))
+
+- Upgrade celine-sdk to 1.12.1
+  ([`4db4934`](https://github.com/celine-eu/rec-registry/commit/4db493419e9fa0ee4c6e4acebafed9ccd43fcd3d))
+
+- Upgrade celine-sdk to 1.13.0
+  ([`c3d6067`](https://github.com/celine-eu/rec-registry/commit/c3d6067ae4c9b8d3304869ca567f6f9008b5661c))
+
+- **deps**: Bump fastapi from 0.128.0 to 0.136.1
+  ([`07c4f72`](https://github.com/celine-eu/rec-registry/commit/07c4f7221da3f7d3c957a40142d741905a8b8295))
+
+- **deps**: Bump pydantic-settings from 2.12.0 to 2.13.1
+  ([`0567ed9`](https://github.com/celine-eu/rec-registry/commit/0567ed97b3f242b6c0dc011b13709651a7182b6f))
+
+- **deps**: Bump sqlalchemy
+  ([`2b30666`](https://github.com/celine-eu/rec-registry/commit/2b30666b1d66b1cd7cb524dec28a795e75e3c5f8))
+
+- **deps**: Bump the runtime-dependencies group across 1 directory with 2 updates
+  ([`4db321c`](https://github.com/celine-eu/rec-registry/commit/4db321c8fdb75798f064c3c9c0a4a4260b211964))
+
+- **deps-dev**: Bump pytest
+  ([`a66aef4`](https://github.com/celine-eu/rec-registry/commit/a66aef4bb28759c0deeb766c459466616ff553f6))
+
+### Continuous Integration
+
+- Bump hynek/build-and-inspect-python-package
+  ([`c54d93a`](https://github.com/celine-eu/rec-registry/commit/c54d93aceb7ce7a0e89c626514f17a60e2805094))
+
+### Features
+
+- Use sdk group extraction
+  ([`793217f`](https://github.com/celine-eu/rec-registry/commit/793217feab92bbde3f92a22d75da643e8bd5d43c))
+
+
 ## v1.4.0 (2026-04-16)
 
 ### Bug Fixes
