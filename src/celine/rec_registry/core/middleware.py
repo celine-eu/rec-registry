@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 
 from celine.sdk.auth import JwtUser
+from celine.sdk.auth.jwt import extract_groups
 from celine.sdk.policies import (
     Action,
     CachedPolicyEngine,
@@ -210,10 +211,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         elif not isinstance(scopes, list):
             scopes = []
 
-        # Extract groups from JWT claims
-        groups = user.claims.get("groups", [])
-        if not isinstance(groups, list):
-            groups = []
+        groups = extract_groups(user.claims)
 
         # Build policy input
         policy_input = PolicyInput(
