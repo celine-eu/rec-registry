@@ -3,7 +3,7 @@ schema_version: "0.5"
 
 metadata:
   created: "2024-01-15"
-  updated: "2025-02-08"
+  updated: "2026-07-02"
   updated_by: "system"
   description: Example Renewable Energy Community registry
 
@@ -41,40 +41,29 @@ community:
     northern:
       name: northern
       topology:
-        - "AC221E00020"
-
-    central:
-      name: central
-      topology:
-        - "AC221E00014"
+        - "AC001E00001"
 
     southern:
       name: southern
       topology:
-        - "AC221E00017"
+        - "AC001E00002"
 
   topology:
-    - id: "PS-northern-001"
+    - id: "PS-001"
       type: primary_substation
-      name: "Primary Substation northern"
+      name: "Primary Substation 001"
       operator_id: example-dso
 
-    - id: "AC221E00020"
+    - id: "AC001E00001"
       type: secondary_substation
       name: "Secondary Substation northern"
-      parent: "PS-northern-001"
+      parent: "PS-001"
       operator_id: example-dso
 
-    - id: "AC221E00014"
-      type: secondary_substation
-      name: "Secondary Substation central"
-      parent: "PS-northern-001"
-      operator_id: example-dso
-
-    - id: "AC221E00017"
+    - id: "AC001E00002"
       type: secondary_substation
       name: "Secondary Substation southern"
-      parent: "PS-northern-001"
+      parent: "PS-001"
       operator_id: example-dso
 
 members:
@@ -94,7 +83,7 @@ members:
       meter:
         meter-ah-00001:
           name: Meter AH-00001
-          sensor_id: c2g-57CFBC3F0
+          sensor_id: c2g-F00000001
           meter_type: consumption
           pod: "POD-8KQ2M7T1V6ZN"
           device:
@@ -126,7 +115,7 @@ members:
       meter:
         meter-ah-00002:
           name: Meter AH-00002
-          sensor_id: c2g-57CFA0F18
+          sensor_id: c2g-F00000002
           meter_type: bidirectional
           pod: "POD-3MV8TL1ZP6NQ"
           device:
@@ -139,9 +128,9 @@ members:
   ah-00003:
     user_id: "ah-00003"
     name: Participant AH-00003
-    type: "schema:Person"
+    type: "schema:GovernmentOrganization"
     role: prosumer
-    area: central
+    area: southern
     status: active
     delivery_points:
       - id: "POD-5XT0MQ7VL2NR"
@@ -168,7 +157,7 @@ members:
       meter:
         meter-ah-00003:
           name: Meter AH-00003
-          sensor_id: c2g-686DEF19C
+          sensor_id: c2g-F00000003
           meter_type: bidirectional
           pod: "POD-5XT0MQ7VL2NR"
           device:
@@ -182,9 +171,9 @@ members:
   ah-00004:
     user_id: "ah-00004"
     name: Participant AH-00004
-    type: "schema:GovernmentOrganization"
-    role: prosumer
-    area: central
+    type: "schema:LocalBusiness"
+    role: consumer
+    area: southern
     status: active
     delivery_points:
       - id: "POD-7QS1PX4MT9ZB"
@@ -192,455 +181,12 @@ members:
         description: "Main residence"
         active: true
     assets:
-      pv:
-        pv-ah-00004:
-          name: PV system AH-00004
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00004
-      storage:
-        storage-ah-00004:
-          name: Storage system AH-00004
-          capacity: null
-          max_charge_power: null
-          max_discharge_power: null
-          relationships:
-            measures:
-              - meter-ah-00004
       meter:
         meter-ah-00004:
           name: Meter AH-00004
-          sensor_id: c2g-3987B3594
-          meter_type: bidirectional
+          sensor_id: c2g-F00000004
+          meter_type: consumption
           pod: "POD-7QS1PX4MT9ZB"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00004
-              - storage-ah-00004
-
-  ah-00005:
-    user_id: "ah-00005"
-    name: Participant AH-00005
-    type: "schema:Person"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-2V2NQ8WZ5RP0"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00005:
-          name: PV system AH-00005
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00005
-      meter:
-        meter-ah-00005:
-          name: Meter AH-00005
-          sensor_id: c2g-57CFB17D0
-          meter_type: bidirectional
-          pod: "POD-2V2NQ8WZ5RP0"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00005
-
-  ah-00006:
-    user_id: "ah-00006"
-    name: Participant AH-00006
-    type: "schema:Person"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-1T6VL3NR8XMQ"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00006:
-          name: PV system AH-00006
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00006
-      meter:
-        meter-ah-00006:
-          name: Meter AH-00006
-          sensor_id: c2g-3987C9968
-          meter_type: bidirectional
-          pod: "POD-1T6VL3NR8XMQ"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00006
-
-  ah-00007:
-    user_id: "ah-00007"
-    name: Participant AH-00007
-    type: "schema:GovernmentOrganization"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-4MT9ZB1QR6SX"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00007:
-          name: PV system AH-00007
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00007
-      meter:
-        meter-ah-00007:
-          name: Meter AH-00007
-          sensor_id: c2g-793E62FD4
-          meter_type: bidirectional
-          pod: "POD-4MT9ZB1QR6SX"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00007
-
-  ah-00008:
-    user_id: "ah-00008"
-    name: Participant AH-00008
-    type: "schema:LocalBusiness"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-0SL5MQ8WZ2RP"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00008:
-          name: PV system AH-00008
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00008
-      meter:
-        meter-ah-00008:
-          name: Meter AH-00008
-          sensor_id: c2g-57CFAAA3C
-          meter_type: bidirectional
-          pod: "POD-0SL5MQ8WZ2RP"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00008
-
-  ah-00009:
-    user_id: "ah-00009"
-    name: Participant AH-00009
-    type: "schema:Person"
-    role: consumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-3NV8TL1ZQ6RP"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      meter:
-        meter-ah-00009:
-          name: Meter AH-00009
-          sensor_id: c2g-9FFB88164
-          meter_type: consumption
-          pod: "POD-3NV8TL1ZQ6RP"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures: []
-
-  ah-00010:
-    user_id: "ah-00010"
-    name: Participant AH-00010
-    type: "schema:GovernmentOrganization"
-    role: prosumer
-    area: central
-    status: active
-    delivery_points:
-      - id: "POD-2CB7QR1MT9SX"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00010:
-          name: PV system AH-00010
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00010
-      meter:
-        meter-ah-00010:
-          name: Meter AH-00010
-          sensor_id: c2g-9FFB8852C
-          meter_type: bidirectional
-          pod: "POD-2CB7QR1MT9SX"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00010
-
-  ah-00011:
-    user_id: "ah-00011"
-    name: Participant AH-00011
-    type: "schema:Person"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-6NR2XP7MQ1ZQ"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00011:
-          name: PV system AH-00011
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00011
-      storage:
-        storage-ah-00011:
-          name: Storage system AH-00011
-          capacity: null
-          max_charge_power: null
-          max_discharge_power: null
-          relationships:
-            measures:
-              - meter-ah-00011
-      meter:
-        meter-ah-00011:
-          name: Meter AH-00011
-          sensor_id: c2g-9FFB88540
-          meter_type: bidirectional
-          pod: "POD-6NR2XP7MQ1ZQ"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00011
-              - storage-ah-00011
-
-  ah-00012:
-    user_id: "ah-00012"
-    name: Participant AH-00012
-    type: "schema:Person"
-    role: prosumer
-    area: central
-    status: active
-    delivery_points:
-      - id: "POD-9VQ3NR5XT0MT"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00012:
-          name: PV system AH-00012
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00012
-      meter:
-        meter-ah-00012:
-          name: Meter AH-00012
-          sensor_id: c2g-9FFB8AAA4
-          meter_type: bidirectional
-          pod: "POD-9VQ3NR5XT0MT"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00012
-
-  ah-00013:
-    user_id: "ah-00013"
-    name: Participant AH-00013
-    type: "schema:Person"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-1ZP6NQ3MV8TL"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00013:
-          name: PV system AH-00013
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00013
-      meter:
-        meter-ah-00013:
-          name: Meter AH-00013
-          sensor_id: c2g-57CFCD3D0
-          meter_type: bidirectional
-          pod: "POD-1ZP6NQ3MV8TL"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00013
-
-  ah-00014:
-    user_id: "ah-00014"
-    name: Participant AH-00014
-    type: "schema:GovernmentOrganization"
-    role: prosumer
-    area: southern
-    status: active
-    delivery_points:
-      - id: "POD-7VL2NR5XT0MQ"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00014:
-          name: PV system AH-00014
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00014
-      meter:
-        meter-ah-00014:
-          name: Meter AH-00014
-          sensor_id: c2g-9FFB88EEC
-          meter_type: bidirectional
-          pod: "POD-7VL2NR5XT0MQ"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00014
-
-  ah-00015:
-    user_id: "ah-00015"
-    name: Participant AH-00015
-    type: "schema:Person"
-    role: prosumer
-    area: northern
-    status: active
-    delivery_points:
-      - id: "POD-2RP0SL5MQ8WZ"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      pv:
-        pv-ah-00015:
-          name: PV system AH-00015
-          rated_power: null
-          relationships:
-            measures:
-              - meter-ah-00015
-      storage:
-        storage-ah-00015:
-          name: Storage system AH-00015
-          capacity: null
-          max_charge_power: null
-          max_discharge_power: null
-          relationships:
-            measures:
-              - meter-ah-00015
-      meter:
-        meter-ah-00015:
-          name: Meter AH-00015
-          sensor_id: c2g-9FFB8AA78
-          meter_type: bidirectional
-          pod: "POD-2RP0SL5MQ8WZ"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures:
-              - pv-ah-00015
-              - storage-ah-00015
-
-  ah-00016:
-    user_id: "ah-00016"
-    name: Participant AH-00016
-    type: "schema:Person"
-    role: consumer
-    area: southern
-    status: active
-    delivery_points:
-      - id: "POD-4T2MP8XL1NQ6"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      meter:
-        meter-ah-00016:
-          name: Meter AH-00016
-          sensor_id: c2g-9FFB88514
-          meter_type: consumption
-          pod: "POD-4T2MP8XL1NQ6"
-          device:
-            type: mac
-            model: plug
-          relationships:
-            measures: []
-
-  ah-00017:
-    user_id: "ah-00017"
-    name: Participant AH-00017
-    type: "schema:LocalBusiness"
-    role: consumer
-    area: central
-    status: active
-    delivery_points:
-      - id: "POD-9SKP9ST3NV7Q"
-        type: pod
-        description: "Main residence"
-        active: true
-    assets:
-      meter:
-        meter-ah-00017:
-          name: Meter AH-00017
-          sensor_id: c2g-9FFB8AA54
-          meter_type: consumption
-          pod: "POD-9SKP9ST3NV7Q"
           device:
             type: mac
             model: plug
