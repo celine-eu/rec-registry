@@ -137,6 +137,47 @@ Import is a **full replace** operation:
 
 Missing entities in the new bundle are deleted. Changed entities are recreated. New entities are added.
 
+### The `force` guard
+
+Because step 1 deletes everything, and because **members now arrive at runtime**
+through the member API, restoring a stale export is the likeliest way to lose
+weeks of approvals. So an import naming a community that already exists is
+**refused** unless `force` is set:
+
+```bash
+# Refused, naming what would have gone
+celine-rec-registry import --file rec.yaml
+#   Refused: Community 'example_rec' already exists with 17 member(s) and 33
+#   asset(s); importing would delete them.
+
+# See the effect first — this is how you decide whether force is warranted
+celine-rec-registry import --file rec.yaml --dry-run
+
+# Accept it
+celine-rec-registry import --file rec.yaml --force
+```
+
+Over HTTP the same guard answers `409`, with `force` as a body field on
+`POST /admin/import` and a query parameter on `POST /admin/import/yaml`. A
+`dry_run` is never blocked — reporting the counts is exactly how a caller judges
+whether to force.
+
+Creating a community that does not exist yet needs no `force`.
+
+## Seeding versus changing
+
+A community is **seeded** from a bundle and **changes** through the member API
+(`POST /admin/communities/{key}/members` and its sub-resources). Both paths build
+the same rows — they share `services/members.py` — so an export taken after
+runtime changes re-imports to the same state. That property is pinned by
+`tests/test_writes.py::TestRoundTrip`; if it ever breaks, the two write paths
+have diverged and a re-import will quietly revert live data.
+
+The practical rule: the file is a **seed**, `GET /admin/export` is a **backup**,
+and once members arrive at runtime the database is the source of truth.
+
 ## Idempotency
 
-Import is idempotent: importing the same bundle twice produces the same state. Use exports as authoritative backups and re-import to restore.
+Import is idempotent: importing the same bundle twice produces the same state
+(with `force`, since the second run is by definition a replacement). Use exports
+as authoritative backups and re-import to restore.

@@ -8,7 +8,10 @@ import pytest
 from unittest.mock import MagicMock
 
 from celine.rec_registry.schemas.bundle import RegistryBundleIn
-from celine.rec_registry.services.importer import replacement_import_bundle
+from celine.rec_registry.services.importer import (
+    ImportWouldOverwrite,
+    replacement_import_bundle,
+)
 
 
 @pytest.fixture
@@ -98,9 +101,9 @@ class TestLiveImport:
 
         assert key == "example_rec"
         assert inserted["community"] == 1
-        assert inserted["member"] == 17
-        # community + 17 members + assets all added via session.add
-        assert mock_session.add.call_count >= 18
+        assert inserted["member"] == 4
+        # community + 4 members + 7 assets, all added via session.add
+        assert mock_session.add.call_count >= 5
 
     async def test_replacement_deletes_existing_before_insert(
         self, mock_session, minimal_bundle
@@ -110,9 +113,55 @@ class TestLiveImport:
         existing.assets = []
         mock_session.scalar.return_value = existing
 
-        await replacement_import_bundle(mock_session, minimal_bundle, dry_run=False)
+        await replacement_import_bundle(
+            mock_session, minimal_bundle, dry_run=False, force=True
+        )
 
         mock_session.delete.assert_awaited_once_with(existing)
+
+    async def test_replacing_an_existing_community_needs_force(
+        self, mock_session, minimal_bundle
+    ):
+        """Members now arrive at runtime, so a stale export is the likeliest way
+        to lose them. Overwriting has to be asked for."""
+        existing = MagicMock()
+        existing.members = [MagicMock(), MagicMock()]
+        existing.assets = [MagicMock()]
+        mock_session.scalar.return_value = existing
+
+        with pytest.raises(ImportWouldOverwrite) as exc:
+            await replacement_import_bundle(mock_session, minimal_bundle, dry_run=False)
+
+        # The refusal names what would have gone, so the caller can judge.
+        assert exc.value.members == 2
+        assert exc.value.assets == 1
+        mock_session.delete.assert_not_awaited()
+
+    async def test_dry_run_reports_instead_of_refusing(
+        self, mock_session, minimal_bundle
+    ):
+        """Seeing the counts is how a caller decides whether force is warranted,
+        so a dry run must not be blocked by the guard it informs."""
+        existing = MagicMock()
+        existing.members = [MagicMock()]
+        existing.assets = []
+        mock_session.scalar.return_value = existing
+
+        _, deleted, _, _ = await replacement_import_bundle(
+            mock_session, minimal_bundle, dry_run=True
+        )
+
+        assert deleted["member"] == 1
+        mock_session.delete.assert_not_awaited()
+
+    async def test_a_new_community_needs_no_force(self, mock_session, minimal_bundle):
+        mock_session.scalar.return_value = None
+
+        key, deleted, _, _ = await replacement_import_bundle(
+            mock_session, minimal_bundle, dry_run=False
+        )
+
+        assert deleted["community"] == 0
 
     async def test_flush_called_after_each_batch(self, mock_session, minimal_bundle):
         mock_session.scalar.return_value = None

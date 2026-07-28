@@ -10,6 +10,7 @@ from celine.rec_registry.api.user import router as user_router
 
 from celine.rec_registry.api.admin.communities import router as communities_router
 from celine.rec_registry.api.admin.lookup import router as lookup_router
+from celine.rec_registry.api.admin.writes import router as writes_router
 from celine.rec_registry.api.admin.management import router as management_router
 
 
@@ -36,5 +37,6 @@ def create_app():
     app.include_router(prefix="/admin", tags=["admin"], router=management_router)
     app.include_router(prefix="/admin", tags=["admin"], router=communities_router)
     app.include_router(prefix="/admin", tags=["admin"], router=lookup_router)
+    app.include_router(prefix="/admin", tags=["admin"], router=writes_router)
 
     return app

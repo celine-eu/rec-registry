@@ -348,6 +348,11 @@ class ImportRequest(BaseModel):
     """Import request payload."""
     bundle: RegistryBundleIn
     dry_run: bool = False
+    # Replacement import deletes the existing community and everything under it.
+    # Since members now arrive at runtime, restoring a stale export is the most
+    # likely way to lose them — so overwriting an existing community has to be
+    # asked for explicitly.
+    force: bool = False
 
 
 class ImportReport(BaseModel):

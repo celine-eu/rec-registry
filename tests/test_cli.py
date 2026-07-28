@@ -125,7 +125,9 @@ class TestImportCommand:
             )
 
         _, call_kwargs = mock_post.call_args
-        assert call_kwargs["params"] == {"dry_run": "true"}
+        # `force` rides along on every import: the destructive default is off,
+        # and the CLI has to say so explicitly rather than omit the parameter.
+        assert call_kwargs["params"] == {"dry_run": "true", "force": "false"}
 
     def test_import_posts_to_yaml_endpoint(self):
         mock_post = MagicMock(return_value=make_http_response(self._multi_report()))

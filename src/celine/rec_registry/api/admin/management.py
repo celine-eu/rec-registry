@@ -16,7 +16,10 @@ from celine.rec_registry.schemas.bundle import (
     MultiImportReport,
     RegistryBundleIn,
 )
-from celine.rec_registry.services.importer import replacement_import_bundle
+from celine.rec_registry.services.importer import (
+    ImportWouldOverwrite,
+    replacement_import_bundle,
+)
 from celine.rec_registry.services.exporter import export_community_bundle
 from celine.rec_registry.core.yaml_io import load_yaml_all, dump_yaml, dump_yaml_all
 
@@ -29,20 +32,30 @@ async def admin_import(
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Idempotent replacement import of a REC registry bundle.
+    Replacement import of a REC registry bundle.
 
     - Deletes existing community (by community.id/key) with all related data
     - Creates new community with members and assets atomically
     - Returns counts of deleted and inserted entities
 
-    Use `dry_run=true` to validate without making changes.
+    **This is destructive.** Members now arrive at runtime through the member
+    API, so re-importing a stale export is the most likely way to lose them.
+    Overwriting an existing community therefore requires `force=true`, and
+    answers `409` without it, naming what would have been deleted.
+
+    Use `dry_run=true` to see the effect first — that is the intended way to
+    decide whether `force` is warranted.
     """
-    async with session.begin():
-        community_key, deleted, inserted, warnings = await replacement_import_bundle(
-            session=session,
-            bundle=payload.bundle,
-            dry_run=payload.dry_run,
-        )
+    try:
+        async with session.begin():
+            community_key, deleted, inserted, warnings = await replacement_import_bundle(
+                session=session,
+                bundle=payload.bundle,
+                dry_run=payload.dry_run,
+                force=payload.force,
+            )
+    except ImportWouldOverwrite as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return ImportReport(
         community_key=community_key,
@@ -56,13 +69,23 @@ async def admin_import(
 async def admin_import_yaml(
     request: Request,
     dry_run: bool = Query(False, description="Validate without making changes"),
+    force: bool = Query(
+        False,
+        description=(
+            "Overwrite communities that already exist. Without it an existing "
+            "community answers 409 rather than being deleted and recreated."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Idempotent replacement import of one or more REC registry bundles from YAML.
+    Replacement import of one or more REC registry bundles from YAML.
 
     Accepts a multidocument YAML body (documents separated by `---`).
     Each document must be a valid registry bundle.
+
+    **Destructive**: see `POST /admin/import`. `force=true` is required to
+    overwrite an existing community.
 
     Returns a report for each imported bundle.
     """
@@ -91,19 +114,23 @@ async def admin_import_yaml(
             )
 
     reports: list[ImportReport] = []
-    async with session.begin():
-        for bundle in bundles:
-            community_key, deleted, inserted, warnings = await replacement_import_bundle(
-                session=session,
-                bundle=bundle,
-                dry_run=dry_run,
-            )
-            reports.append(ImportReport(
-                community_key=community_key,
-                deleted=deleted,
-                inserted=inserted,
-                warnings=warnings,
-            ))
+    try:
+        async with session.begin():
+            for bundle in bundles:
+                community_key, deleted, inserted, warnings = await replacement_import_bundle(
+                    session=session,
+                    bundle=bundle,
+                    dry_run=dry_run,
+                    force=force,
+                )
+                reports.append(ImportReport(
+                    community_key=community_key,
+                    deleted=deleted,
+                    inserted=inserted,
+                    warnings=warnings,
+                ))
+    except ImportWouldOverwrite as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return MultiImportReport(reports=reports, dry_run=dry_run)
 

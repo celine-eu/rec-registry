@@ -45,6 +45,12 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    # Needs a real PostgreSQL. Skipped automatically when none is reachable, so
+    # the suite stays runnable anywhere — but these are the tests that prove the
+    # write API and the bundle importer agree, which mocks cannot.
+    "integration: requires a live database",
+]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]

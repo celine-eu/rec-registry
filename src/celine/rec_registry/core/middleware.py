@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from urllib.parse import parse_qs
 
 from celine.sdk.auth import JwtUser
 from celine.sdk.auth.jwt import extract_groups
@@ -35,6 +36,21 @@ from celine.rec_registry.core.settings import settings
 logger = logging.getLogger(__name__)
 
 REQUEST_USER_KEY = "user"
+
+# Methods that only read. Everything else mutates and is authorized separately.
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _wants_purge(query: str) -> bool:
+    """Whether a delete asks for permanent erasure rather than deactivation.
+
+    Read from the raw query string because the authorization decision is made
+    before the route parses anything. Anything not explicitly truthy is a soft
+    delete: the safe reading of an ambiguous request is the recoverable one.
+    """
+    return parse_qs(query).get("purge", ["false"])[-1].strip().lower() in _TRUTHY
 
 
 @dataclass(frozen=True)
@@ -133,7 +149,9 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 decision = await self._check_policies(
                     request=request,
                     user=user,
-                    action=self._get_admin_action(path),
+                    action=self._get_admin_action(
+                        path, request.method, request.url.query
+                    ),
                     resource_id=self._get_resource_id(path),
                 )
                 if not decision.allowed:
@@ -157,15 +175,43 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         public_paths = {"/health", "/version", "/openapi.json", "/docs", "/redoc"}
         return path in public_paths or path.startswith("/docs/")
 
-    def _get_admin_action(self, path: str) -> str:
-        """Get action name for admin paths."""
+    def _get_admin_action(self, path: str, method: str, query: str = "") -> str:
+        """Name the action an admin request performs.
+
+        Derived from the path *and* the method, because reading a community and
+        rewriting its members are not the same permission. While every admin
+        route was a read this distinction did not exist; now that a service
+        account can create members it does, and granting a writer the ability to
+        read everything — or a reader the ability to write — is the kind of
+        over-grant `rec-registry.admin` was already too broad for.
+
+        `rec-registry.admin` continues to satisfy all of these: the shared scope
+        matcher treats `{service}.admin` as covering `{service}.*`, so nothing
+        that works today stops working.
+        """
         if "lookup" in path:
             return "lookup"
         if "import" in path:
             return "import"
         if "export" in path:
             return "export"
-        return "admin"
+
+        if method in _READ_METHODS:
+            return "read"
+
+        # Writes are named by what they touch. Assets is checked first because an
+        # asset path contains "/members" too.
+        if "/assets" in path:
+            return "assets.write"
+        if "/members" in path:
+            # Erasure is not deactivation. Deactivating a member is recoverable;
+            # purging them takes their assets with it and cannot be undone, so it
+            # is a grant an operator can withhold from a service that otherwise
+            # manages members.
+            if method == "DELETE" and _wants_purge(query):
+                return "members.purge"
+            return "members.write"
+        return "community.write"
 
     def _get_resource_id(self, path: str) -> str:
         """Extract resource identifier from path."""

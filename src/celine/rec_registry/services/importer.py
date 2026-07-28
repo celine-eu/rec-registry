@@ -59,11 +59,33 @@ def _extract_device(asset_data: Any) -> dict[str, Any]:
     return {}
 
 
+class ImportWouldOverwrite(Exception):
+    """The bundle names a community that already exists, and force was not set.
+
+    Import is *replacement*: it deletes the existing community with all its
+    members and assets, then recreates it from the bundle. That was safe while
+    the YAML was the only source of members. Now that members arrive at runtime,
+    re-importing a stale export is the most likely way to lose them — so the
+    caller has to say they mean it.
+    """
+
+    def __init__(self, community_key: str, members: int, assets: int):
+        self.community_key = community_key
+        self.members = members
+        self.assets = assets
+        super().__init__(
+            f"Community {community_key!r} already exists with {members} member(s) "
+            f"and {assets} asset(s); importing would delete them. Re-run with "
+            f"dry_run to see the effect, or force to accept it."
+        )
+
+
 async def replacement_import_bundle(
     session: AsyncSession,
     bundle: RegistryBundleIn,
     *,
     dry_run: bool = False,
+    force: bool = False,
 ) -> tuple[str, dict[str, int], dict[str, int], list[str]]:
     """
     Perform idempotent replacement import of a registry bundle.
@@ -72,9 +94,13 @@ async def replacement_import_bundle(
         session: Database session
         bundle: Parsed registry bundle
         dry_run: If True, validate without committing changes
+        force: Required to overwrite a community that already exists
 
     Returns:
         Tuple of (community_key, deleted_counts, inserted_counts, warnings)
+
+    Raises:
+        ImportWouldOverwrite: the community exists and force was not set
     """
     warnings: list[str] = []
     community_key = bundle.community.id
@@ -95,6 +121,13 @@ async def replacement_import_bundle(
         deleted["community"] = 1
         deleted["member"] = len(existing.members)
         deleted["asset"] = len(existing.assets)
+
+        # A dry run reports the damage instead of refusing — seeing the counts is
+        # exactly how a caller decides whether to pass force.
+        if not force and not dry_run:
+            raise ImportWouldOverwrite(
+                community_key, deleted["member"], deleted["asset"]
+            )
 
         if not dry_run:
             await session.delete(existing)
@@ -192,18 +225,12 @@ async def replacement_import_bundle(
     member_by_key: dict[str, Member] = {}
 
     for member_key, member_data in bundle.members.items():
-        # Build delivery_points list
-        delivery_points_list = []
-        for dp in member_data.delivery_points:
-            dp_dict = {"id": dp.id, "type": dp.type}
-            if dp.description:
-                dp_dict["description"] = dp.description
-            if dp.address:
-                dp_dict["address"] = dp.address
-            if dp.tariff:
-                dp_dict["tariff"] = dp.tariff
-            dp_dict["active"] = dp.active
-            delivery_points_list.append(dp_dict)
+        # Built by the shared helpers the admin API also uses, so a member that
+        # arrives in a bundle and one created through the API are the same row.
+        from celine.rec_registry.services.members import (
+            build_delivery_points,
+            build_member_extra,
+        )
 
         member = Member(
             community_id=community.id,
@@ -213,14 +240,8 @@ async def replacement_import_bundle(
             role=member_data.role,
             area=member_data.area,
             status=member_data.status,
-            delivery_points=delivery_points_list,
-            extra={
-                **({"type": member_data.type} if member_data.type else {}),
-                **_extract_extra(
-                    member_data,
-                    {"user_id", "name", "type", "role", "area", "status", "delivery_points", "assets"},
-                ),
-            },
+            delivery_points=build_delivery_points(member_data.delivery_points),
+            extra=build_member_extra(member_data),
         )
         session.add(member)
         member_by_key[member_key] = member

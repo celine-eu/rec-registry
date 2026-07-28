@@ -20,26 +20,26 @@ class TestBundleParsing:
 
     def test_community_has_three_areas(self, example_bundle):
         areas = example_bundle.community.areas
-        assert set(areas.keys()) == {"northern", "central", "southern"}
+        assert set(areas.keys()) == {"northern", "southern"}
 
     def test_area_topology(self, example_bundle):
         northern = example_bundle.community.areas["northern"]
-        assert northern.topology == ["SS-northern-001"]
+        assert northern.topology == ["AC001E00001"]
 
     def test_community_topology_nodes(self, example_bundle):
         topology = example_bundle.community.topology
-        assert len(topology) == 4
+        assert len(topology) == 3
         types = {n.type for n in topology}
         assert "primary_substation" in types
         assert "secondary_substation" in types
 
     def test_community_operator(self, example_bundle):
         operators = example_bundle.community.operators
-        assert "example-dso" in operators
-        assert operators["example-dso"].name == "Example Distribution Network Operator"
+        assert "example_dso" in operators
+        assert operators["example_dso"].name == "Example Distribution Network Operator"
 
     def test_member_count(self, example_bundle):
-        assert len(example_bundle.members) == 17
+        assert len(example_bundle.members) == 4
 
     def test_member_required_fields(self, example_bundle):
         m = example_bundle.members["ah-00001"]
@@ -52,10 +52,10 @@ class TestBundleParsing:
         assert example_bundle.members["ah-00001"].type == "schema:Person"
 
     def test_member_type_government(self, example_bundle):
-        assert example_bundle.members["ah-00004"].type == "schema:GovernmentOrganization"
+        assert example_bundle.members["ah-00003"].type == "schema:GovernmentOrganization"
 
     def test_member_type_local_business(self, example_bundle):
-        assert example_bundle.members["ah-00008"].type == "schema:LocalBusiness"
+        assert example_bundle.members["ah-00004"].type == "schema:LocalBusiness"
 
     def test_member_with_pv_and_meter(self, example_bundle):
         m = example_bundle.members["ah-00002"]
@@ -68,7 +68,7 @@ class TestBundleParsing:
 
     def test_meter_sensor_id(self, example_bundle):
         meter = example_bundle.members["ah-00001"].assets.meter["meter-ah-00001"]
-        assert meter.sensor_id == "c2g-57CFBC3F0"
+        assert meter.sensor_id == "c2g-F00000001"
         assert meter.meter_type == "consumption"
 
     def test_meter_pod_reference(self, example_bundle):

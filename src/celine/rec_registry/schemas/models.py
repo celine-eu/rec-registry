@@ -7,6 +7,8 @@ from __future__ import annotations
 from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, Field
 
+from celine.rec_registry.schemas.bundle import MemberIn
+
 T = TypeVar("T")
 
 
@@ -388,3 +390,96 @@ class UserDeliveryPointsResponse(BaseModel):
 
 class SensorIdsBatchRequest(BaseModel):
     sensor_ids: list[str]
+
+# =============================================================================
+# Write requests (Admin)
+# =============================================================================
+#
+# Member and asset payloads reuse the bundle component models rather than
+# declaring parallel ones: a member created through the API and one that arrived
+# in a YAML bundle must be the same row, and two schemas for the same object
+# drift on the first schema-version bump.
+
+
+class MemberCreate(MemberIn):
+    """Create one member. `key` is minted from the community's own numbering
+    when omitted, so a caller with no opinion still gets `gl-00007` rather than
+    something that reads as foreign in an exported bundle."""
+
+    key: str | None = None
+
+
+class MemberPatch(BaseModel):
+    """Partial update. Absent fields are left alone, never cleared.
+
+    `delivery_points` is deliberately absent: it is a JSONB list, and a patch
+    that happened to omit it would otherwise read as "this member now has none".
+    It has its own sub-resource.
+    """
+
+    user_id: str | None = None
+    name: str | None = None
+    type: str | None = None
+    role: str | None = None
+    area: str | None = None
+    status: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+class MemberStatusChange(BaseModel):
+    """Move a member through `pending → active → suspended → inactive`."""
+
+    status: str
+    reason: str | None = None
+
+
+class AssetUpsert(BaseModel):
+    """Create or replace one asset of a member.
+
+    `properties` is validated against the model for `asset_type`, so an EV
+    charger cannot be stored with a heat pump's fields.
+    """
+
+    key: str
+    asset_type: str
+    properties: dict[str, Any] = JsonField("AssetUpsertProperties")
+
+
+class DeletionReport(BaseModel):
+    """What a delete did.
+
+    `purged` distinguishes deactivation from erasure — the same endpoint does
+    both, and the caller should be able to tell which happened.
+    """
+
+    community_key: str
+    member_key: str
+    purged: bool
+    status: str | None = None
+    assets_removed: int = 0
+
+
+class AreaUpsert(BaseModel):
+    """Create or replace one area of a community."""
+
+    name: str
+    location: Location | None = None
+    geometry: dict[str, Any] | None = None
+    topology: list[str] = Field(default_factory=list)
+
+
+class CommunityPatch(BaseModel):
+    """Partial update of community metadata.
+
+    Areas and topology are not here: they are collections with their own
+    identity, and a patch omitting them must not read as "this community now
+    has none".
+    """
+
+    name: str | None = None
+    description: str | None = None
+    legal: dict[str, Any] | None = None
+    links: dict[str, Any] | None = None
+    contact: dict[str, Any] | None = None
+    settings: dict[str, Any] | None = None
+    extra: dict[str, Any] | None = None

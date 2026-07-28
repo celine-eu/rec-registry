@@ -1,5 +1,26 @@
 # API Reference
 
+## Authorization
+
+`/admin` routes need a JWT and an OPA decision. The action is derived from the
+path **and** the HTTP method, so reads and writes are separate grants:
+
+| Action | Reached by | Scope |
+|---|---|---|
+| `read` | any `GET` under `/admin` | `rec-registry.read` |
+| `members.write` | write methods on `…/members…` | `rec-registry.members.write` |
+| `members.purge` | `DELETE …/members/{key}?purge=true` | `rec-registry.members.purge` |
+| `assets.write` | write methods on `…/assets…` | `rec-registry.assets.write` |
+| `community.write` | write methods on a community or its areas | `rec-registry.community.write` |
+| `import` / `export` | `/admin/import*`, `/admin/export` | `rec-registry.import` / `.export` |
+| `lookup` | `/admin/lookup/*` | `rec-registry.lookup` |
+
+`rec-registry.admin` satisfies all of them (the shared matcher treats
+`{service}.admin` as covering `{service}.*`), so existing tokens keep working —
+but **do not give it to a service account**. Grant the actions it calls: a
+service that registers approved participants needs `members.write` and
+`assets.write`, and has no business importing, exporting or purging.
+
 Interactive OpenAPI docs are available at `http://localhost:8004/docs`.
 
 ---
@@ -160,7 +181,9 @@ Import/export operations. Prefix: `/admin`.
 
 Import a community from a JSON bundle. Full replace: deletes existing community graph and recreates from bundle. Atomic operation.
 
-**Request body:** JSON bundle (see [Import & Export](import-export.md)).
+**Destructive.** Overwriting a community that already exists requires `force: true` and otherwise answers `409`, naming the members and assets that would have been deleted. See [Import & Export](import-export.md#the-force-guard).
+
+**Request body:** `{bundle, dry_run, force}` (see [Import & Export](import-export.md)).
 
 **Response:** `ImportReport` with created counts.
 
@@ -168,7 +191,7 @@ Import a community from a JSON bundle. Full replace: deletes existing community 
 
 Import one or more communities from a YAML multidocument body. Each document is a separate community bundle.
 
-**Request body:** `text/yaml` — multidocument YAML.
+**Request body:** `text/yaml` — multidocument YAML. Query: `dry_run`, `force`.
 
 **Response:** `MultiImportReport` with per-community results.
 
@@ -177,6 +200,78 @@ Import one or more communities from a YAML multidocument body. Each document is 
 Export communities as YAML multidocument.
 
 **Response:** `text/plain` — YAML bundle(s).
+
+---
+
+## Admin Routes — Writes
+
+Runtime changes to a community. Prefix: `/admin`.
+
+Every route here keeps one rule: **no write reduces a sibling.** `PUT` on a
+member replaces that member, not the member list; patching a member does not
+clear its delivery points; upserting an area does not drop the others. The only
+endpoint that deletes what it was not given is the bundle import above.
+
+### `POST /admin/communities/{community_key}/members`
+
+Create one member, with its delivery points and assets.
+
+`key` is optional — when omitted it is minted from the community's own
+numbering (`gl-00001` → `gl-00002`), so a caller with no opinion still gets a key
+that reads correctly in an exported bundle.
+
+**Responses:** `201` with the member; `409` when the key or `user_id` is already
+taken, naming the existing key so the caller can switch to `PATCH`; `404` for an
+unknown community.
+
+### `PATCH /admin/communities/{community_key}/members/{member_key}`
+
+Partial update. Absent fields are left alone, never cleared.
+
+`delivery_points` is deliberately not accepted here — it is a JSONB list, and a
+patch that happened to omit it would read as "this member now has none". Use the
+delivery-point routes.
+
+**Responses:** `200`; `409` if the new `user_id` belongs to another member.
+
+### `POST /admin/communities/{community_key}/members/{member_key}/status`
+
+Move a member through `pending → active → suspended → inactive`, with an optional
+`reason` recorded on the member.
+
+### `DELETE /admin/communities/{community_key}/members/{member_key}`
+
+**Deactivates** the member (`status = inactive`). A member who leaves still has
+metering history, past consents and provenance elsewhere that reference them, and
+assets cascade on a real delete.
+
+`?purge=true` erases the member and its assets permanently. It requires the
+separate `rec-registry.members.purge` grant, so a service that manages members
+day to day cannot perform one.
+
+**Response:** `DeletionReport` — `purged` tells the caller which happened.
+
+### `PUT|DELETE /admin/communities/{ck}/members/{mk}/delivery-points/{point_id}`
+
+Add, replace or remove one supply point, keeping the others. The body `id` must
+match the path (`422` otherwise).
+
+### `PUT|DELETE /admin/communities/{ck}/members/{mk}/assets/{asset_key}`
+
+Create, replace or remove one asset. `properties` is validated against the model
+for `asset_type` (`pv`, `storage`, `meter`, `ev_charger`, `heat_pump`, `load`),
+so an EV charger cannot be stored carrying a heat pump's fields.
+
+### `PATCH /admin/communities/{community_key}`
+
+Update community metadata. Areas and topology have their own routes, for the same
+reason delivery points do.
+
+### `PUT|DELETE /admin/communities/{community_key}/areas/{area_key}`
+
+Add, replace or remove one area. Deleting is refused with `409` while members
+still reference it — an orphaned `Member.area` is a dangling reference nothing
+else checks.
 
 ---
 

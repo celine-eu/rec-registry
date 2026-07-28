@@ -240,6 +240,16 @@ def import_bundle(
         "--dry-run",
         help="Validate without writing to database",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help=(
+            "Overwrite a community that already exists. Import is destructive: "
+            "it deletes the community with every member and asset, then "
+            "recreates it from the file. Without this an existing community is "
+            "refused. Try --dry-run first to see what would go."
+        ),
+    ),
     timeout: float = typer.Option(
         60.0,
         "--timeout",
@@ -342,12 +352,23 @@ def import_bundle(
         r = httpx.post(
             url,
             content=yaml_text.encode("utf-8"),
-            params={"dry_run": str(dry_run).lower()},
+            params={
+                "dry_run": str(dry_run).lower(),
+                "force": str(force).lower(),
+            },
             headers=headers,
             timeout=timeout,
         )
     except httpx.HTTPError as exc:
         typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if r.status_code == 409:
+        typer.secho(f"Refused: {r.text}", fg=typer.colors.YELLOW, err=True)
+        typer.secho(
+            "Re-run with --dry-run to see the effect, or --force to accept it.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     if r.status_code >= 400:
