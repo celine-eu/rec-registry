@@ -391,6 +391,17 @@ class UserDeliveryPointsResponse(BaseModel):
 class SensorIdsBatchRequest(BaseModel):
     sensor_ids: list[str]
 
+
+class UserIdsBatchRequest(BaseModel):
+    """Members to resolve assets for.
+
+    Bounded on purpose. A caller that can name ten thousand people in one
+    request has a dump of the registry, not a lookup, and the endpoint is
+    reachable by anything holding `rec-registry.lookup`.
+    """
+
+    user_ids: list[str] = Field(..., max_length=500)
+
 # =============================================================================
 # Write requests (Admin)
 # =============================================================================

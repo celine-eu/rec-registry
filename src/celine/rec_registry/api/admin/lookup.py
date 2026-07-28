@@ -7,6 +7,7 @@ Provides cross-community lookups:
 - Find community by delivery point
 - Find member by user_id
 - Find asset by sensor_id
+- Find assets owned by a set of members
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +28,7 @@ from celine.rec_registry.schemas.models import (
     GlobalMemberLookup,
     GlobalAssetLookup,
     SensorIdsBatchRequest,
+    UserIdsBatchRequest,
 )
 
 router = APIRouter()
@@ -257,6 +259,63 @@ async def lookup_assets_by_sensor_ids(
             device=a.device or {},
             relationships=a.relationships or {},
             owner_key=m.key,
+            owner_user_id=m.user_id,
+            community_key=c.key,
+            community_name=c.name,
+        )
+        for a, m, c in result.all()
+    ]
+
+
+@router.post(
+    "/lookup/assets-by-user-ids",
+    operation_id="lookup_assets_by_user_ids",
+    response_model=list[GlobalAssetLookup],
+)
+async def lookup_assets_by_user_ids(
+    body: UserIdsBatchRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Find assets owned by multiple members, across all communities.
+
+    The mirror of ``assets-by-sensor-ids``: that one starts from a device and
+    finds its owner, this one starts from owners and finds their devices.
+
+    **Why it exists.** A dataspace query is authorised for a *set of people* —
+    the subjects who consented — not for the caller. The existing self-service
+    path (``GET /user/assets``) can only answer "mine", because it resolves the
+    member from the caller's own token. Widening *that* endpoint to take a list
+    would turn a self-service route into a directory with no scope check in
+    front of it, so the batch form belongs here, behind the admin policy.
+
+    **No enumeration oracle.** A ``user_id`` that does not exist and a member
+    who owns nothing are indistinguishable — both contribute no rows. The caller
+    supplies the ids, so any difference in the answer would make this a way to
+    discover who is registered.
+    """
+    if not body.user_ids:
+        return []
+
+    result = await session.execute(
+        select(Asset, Member, Community)
+        .join(Member, Asset.owner_id == Member.id)
+        .join(Community, Asset.community_id == Community.id)
+        .where(Member.user_id.in_(body.user_ids))
+    )
+
+    return [
+        GlobalAssetLookup(
+            id=str(a.id),
+            key=a.key,
+            asset_type=a.asset_type,
+            name=a.name,
+            sensor_id=a.sensor_id,
+            properties=a.properties or {},
+            device=a.device or {},
+            relationships=a.relationships or {},
+            owner_key=m.key,
+            # The caller needs this to attribute rows back to the member it
+            # asked about — the whole point of a batch lookup.
             owner_user_id=m.user_id,
             community_key=c.key,
             community_name=c.name,

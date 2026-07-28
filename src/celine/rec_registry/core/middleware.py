@@ -190,6 +190,14 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         that works today stops working.
         """
         if "lookup" in path:
+            # Resolving *what a named person owns* is a different disclosure
+            # from resolving which community a user or sensor belongs to, so it
+            # gets its own action name. Both are granted by `rec-registry.lookup`
+            # today — nothing changes — but naming them apart is what lets a
+            # policy separate them later without an API change. Same reasoning
+            # that split read from write below.
+            if "assets-by-user-ids" in path:
+                return "assets.lookup"
             return "lookup"
         if "import" in path:
             return "import"

@@ -100,6 +100,14 @@ allow if {
     data.celine.scopes.has_any_scope(["rec-registry.lookup", "rec-registry.admin"])
 }
 
+# Asset lookup by owner - enumerates what named members own, so it is named
+# apart from `lookup` even though the same scopes grant it today. Splitting the
+# grant later is then a policy change, not an API change.
+allow if {
+    input.action.name == "assets.lookup"
+    data.celine.scopes.has_any_scope(["rec-registry.lookup", "rec-registry.admin"])
+}
+
 # =============================================================================
 # REASON - Use else chain to avoid conflicts
 # =============================================================================
