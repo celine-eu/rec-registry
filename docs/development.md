@@ -71,6 +71,21 @@ uv run alembic downgrade -1
 uv run pytest -q
 ```
 
+Tests marked `integration` need a real PostgreSQL and **skip when none is reachable**, so
+a green run means different things depending on whether one was up — with no database, the
+write, lookup and self-service tests do not run:
+
+```bash
+uv run pytest -q -m integration    # only those; TEST_DATABASE_URL overrides the connection
+```
+
+Each run creates and drops a throwaway `rec_registry_test` schema, so it needs no
+`CREATE DATABASE` rights.
+
+A test declares which requirement it covers with a `@verifies REQ-####` tag in its
+docstring; see [the requirements](specifications/index.md) and, for the working procedure,
+`.agents/playbooks/testing.md`.
+
 ## Project Layout
 
 ```
@@ -86,10 +101,12 @@ src/celine/rec_registry/
     user.py                  # Self-service user endpoints
     meta.py                  # Health, version
     admin/
-      communities.py         # Community/member/asset browsing
+      communities.py         # Community/member/asset browsing (reads)
+      writes.py              # Runtime member/asset/area writes
       lookup.py              # Cross-community lookups
       management.py          # Import/export operations
   services/
+    members.py               # Row building, shared by the importer and the write API
     importer.py              # Bundle import logic
     exporter.py              # YAML export logic
   core/
@@ -102,4 +119,9 @@ src/celine/rec_registry/
 policies/                    # OPA .rego policy files
 alembic/
   versions/                  # Migration scripts
+tests/
+  conftest.py                # Fixtures, including the live-database ones
+docs/
+  specifications/            # What the service must do; REQ-#### identifiers
+  decisions/                 # Why a technical choice was made
 ```

@@ -38,6 +38,7 @@ def make_import_result(
 
 class TestImportEndpoint:
     def test_dry_run_returns_200_with_report(self, client):
+        """@verifies REQ-0036"""
         payload = load_import_payload(dry_run=True)
         with patch(IMPORT_PATCH, new=AsyncMock(return_value=make_import_result())):
             resp = client.post("/admin/import", json=payload)
@@ -49,6 +50,7 @@ class TestImportEndpoint:
         assert body["warnings"] == []
 
     def test_live_import_returns_report_with_replaced_counts(self, client):
+        """@verifies REQ-0036"""
         payload = load_import_payload(dry_run=False)
         result = make_import_result(
             deleted={"community": 1, "member": 5, "asset": 10},
@@ -63,6 +65,7 @@ class TestImportEndpoint:
         assert body["deleted"]["member"] == 5
 
     def test_warnings_are_included_in_response(self, client):
+        """@verifies REQ-0036"""
         payload = load_import_payload(dry_run=False)
         result = make_import_result(
             warnings=["Meter meter-x: missing sensor_id; skipped"]
@@ -74,10 +77,12 @@ class TestImportEndpoint:
         assert len(resp.json()["warnings"]) == 1
 
     def test_missing_bundle_field_returns_422(self, client):
+        """@verifies REQ-0036"""
         resp = client.post("/admin/import", json={"dry_run": True})
         assert resp.status_code == 422
 
     def test_malformed_json_returns_422(self, client):
+        """@verifies REQ-0036"""
         resp = client.post(
             "/admin/import",
             content=b"not json",
@@ -86,6 +91,7 @@ class TestImportEndpoint:
         assert resp.status_code == 422
 
     def test_import_called_with_correct_dry_run_flag(self, client):
+        """@verifies REQ-0036"""
         payload = load_import_payload(dry_run=True)
         mock_fn = AsyncMock(return_value=make_import_result())
         with patch(IMPORT_PATCH, new=mock_fn):

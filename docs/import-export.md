@@ -168,7 +168,7 @@ Creating a community that does not exist yet needs no `force`.
 
 A community is **seeded** from a bundle and **changes** through the member API
 (`POST /admin/communities/{key}/members` and its sub-resources). Both paths build
-the same rows — they share `services/members.py` — so an export taken after
+the same rows — they share `src/celine/rec_registry/services/members.py` — so an export taken after
 runtime changes re-imports to the same state. That property is pinned by
 `tests/test_writes.py::TestRoundTrip`; if it ever breaks, the two write paths
 have diverged and a re-import will quietly revert live data.

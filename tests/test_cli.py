@@ -50,6 +50,7 @@ class TestImportCommand:
         }
 
     def test_dry_run_prints_community_key(self):
+        """@verifies REQ-0054"""
         with patch(HTTPX_POST, return_value=make_http_response(self._multi_report())):
             result = runner.invoke(
                 app,
@@ -66,6 +67,7 @@ class TestImportCommand:
         assert "Dry run" in result.output
 
     def test_live_import_prints_success(self):
+        """@verifies REQ-0054"""
         with patch(HTTPX_POST, return_value=make_http_response(self._multi_report())):
             result = runner.invoke(
                 app,
@@ -81,6 +83,7 @@ class TestImportCommand:
         assert "success" in result.output.lower()
 
     def test_http_error_response_exits_nonzero(self):
+        """@verifies REQ-0056"""
         error_body = {"detail": "Forbidden"}
         with patch(
             HTTPX_POST, return_value=make_http_response(error_body, status_code=403)
@@ -97,6 +100,7 @@ class TestImportCommand:
         assert result.exit_code != 0
 
     def test_import_sends_authorization_header(self):
+        """@verifies REQ-0054"""
         mock_post = MagicMock(return_value=make_http_response(self._multi_report()))
         with patch(HTTPX_POST, mock_post):
             runner.invoke(
@@ -112,6 +116,7 @@ class TestImportCommand:
         assert call_kwargs["headers"]["Authorization"] == "Bearer my-secret-token"
 
     def test_import_sends_dry_run_query_param(self):
+        """@verifies REQ-0055"""
         mock_post = MagicMock(return_value=make_http_response(self._multi_report()))
         with patch(HTTPX_POST, mock_post):
             runner.invoke(
@@ -130,6 +135,7 @@ class TestImportCommand:
         assert call_kwargs["params"] == {"dry_run": "true", "force": "false"}
 
     def test_import_posts_to_yaml_endpoint(self):
+        """@verifies REQ-0054"""
         mock_post = MagicMock(return_value=make_http_response(self._multi_report()))
         with patch(HTTPX_POST, mock_post):
             runner.invoke(
@@ -145,6 +151,7 @@ class TestImportCommand:
         assert call_args[0].endswith("/admin/import/yaml")
 
     def test_import_sends_raw_yaml_body(self):
+        """@verifies REQ-0054"""
         mock_post = MagicMock(return_value=make_http_response(self._multi_report()))
         with patch(HTTPX_POST, mock_post):
             runner.invoke(
@@ -165,6 +172,7 @@ class TestExportCommand:
     YAML_BODY = "version: '1.0'\ncommunity:\n  id: rec1\n"
 
     def test_export_single_community_to_stdout(self):
+        """@verifies REQ-0056"""
         with patch(HTTPX_GET, return_value=make_http_response(self.YAML_BODY)):
             result = runner.invoke(
                 app,
@@ -179,6 +187,7 @@ class TestExportCommand:
         assert "rec1" in result.output
 
     def test_export_sends_community_query_param(self):
+        """@verifies REQ-0056"""
         mock_get = MagicMock(return_value=make_http_response(self.YAML_BODY))
         with patch(HTTPX_GET, mock_get):
             runner.invoke(
@@ -194,6 +203,7 @@ class TestExportCommand:
         assert call_kwargs["params"] == [("community", "rec1")]
 
     def test_export_multiple_communities(self):
+        """@verifies REQ-0056"""
         mock_get = MagicMock(return_value=make_http_response(self.YAML_BODY))
         with patch(HTTPX_GET, mock_get):
             runner.invoke(
@@ -210,6 +220,7 @@ class TestExportCommand:
         assert call_kwargs["params"] == [("community", "rec1"), ("community", "rec2")]
 
     def test_export_all_communities_sends_no_community_param(self):
+        """@verifies REQ-0056"""
         mock_get = MagicMock(return_value=make_http_response(self.YAML_BODY))
         with patch(HTTPX_GET, mock_get):
             runner.invoke(
@@ -224,6 +235,7 @@ class TestExportCommand:
         assert call_kwargs["params"] == []
 
     def test_export_sends_authorization_header(self):
+        """@verifies REQ-0056"""
         mock_get = MagicMock(return_value=make_http_response(self.YAML_BODY))
         with patch(HTTPX_GET, mock_get):
             runner.invoke(

@@ -152,12 +152,14 @@ async def live_client(pg_engine):
     from fastapi import FastAPI
 
     from celine.rec_registry.api.admin.communities import router as communities_router
+    from celine.rec_registry.api.admin.lookup import router as lookup_router
     from celine.rec_registry.api.admin.management import router as management_router
     from celine.rec_registry.api.admin.writes import router as writes_router
 
     app = FastAPI()
     app.include_router(management_router, prefix="/admin")
     app.include_router(communities_router, prefix="/admin")
+    app.include_router(lookup_router, prefix="/admin")
     app.include_router(writes_router, prefix="/admin")
 
     # A fresh session per request, as production does. Sharing one across
@@ -178,3 +180,62 @@ async def live_client(pg_engine):
         transport=transport, base_url="http://testserver"
     ) as client:
         yield client
+
+
+@pytest.fixture
+def as_user(pg_engine):
+    """Build a `/user` client authenticated as a chosen identity.
+
+    A factory rather than a fixture because the point of most self-service tests
+    is *two* identities: what one participant sees, and what the other does not.
+
+    `require_user` is overridden rather than a token being minted, because the
+    identity these routes act on does not come from the token wholesale — see
+    `identifies_as` below.
+    """
+    import httpx
+    from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from celine.sdk.auth import JwtUser
+
+    from celine.rec_registry.api.user import router as user_router
+    from celine.rec_registry.core.middleware import require_user
+
+    maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+
+    def build(user: JwtUser) -> httpx.AsyncClient:
+        app = FastAPI()
+        app.include_router(user_router)
+
+        async def override_session():
+            async with maker() as session:
+                yield session
+
+        async def override_user():
+            return user
+
+        app.dependency_overrides[get_session] = override_session
+        app.dependency_overrides[require_user] = override_user
+
+        # ASGITransport holds no connection pool, so the client needs no closing
+        # and the fixture can stay sync — which is what lets a test build a
+        # second identity inline, on the line where the contrast is being made.
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        )
+
+    return build
+
+
+def identifies_as(username: str, *, sub: str = "sub-unused") -> "object":
+    """A token that the user routes will resolve to `Member.user_id == username`.
+
+    The routes match on `JwtUser.get_username()`, which is `preferred_username`
+    and **not** `sub` — so a token carrying only a subject matches no member at
+    all. That is the trap this helper exists to make visible rather than hide:
+    tests that need the failing case build the token without a username.
+    """
+    from celine.sdk.auth import JwtUser
+
+    return JwtUser(sub=sub, preferred_username=username, name=username)

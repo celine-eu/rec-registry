@@ -31,21 +31,30 @@ pytestmark = pytest.mark.asyncio
 class TestMemberKeyMinting:
     def test_follows_the_communitys_own_numbering(self):
         """A caller with no opinion should get the next key in the series, not a
-        UUID that reads as foreign in an exported bundle."""
+        UUID that reads as foreign in an exported bundle.
+
+        @verifies REQ-0021
+        """
         assert member_service.next_member_key(["gl-00001", "gl-00002"]) == "gl-00003"
 
     def test_keeps_the_observed_zero_padding(self):
+        """@verifies REQ-0021"""
         assert member_service.next_member_key(["ab-007"]) == "ab-008"
 
     def test_starts_a_fresh_community_at_one(self):
+        """@verifies REQ-0021"""
         assert member_service.next_member_key([]) == "member-00001"
 
     def test_ignores_keys_that_are_not_numbered(self):
+        """@verifies REQ-0021"""
         assert member_service.next_member_key(["founder", "gl-00004"]) == "gl-00005"
 
     def test_gaps_do_not_reuse_a_key(self):
         """Reusing a freed number would hand a new person the identity of one who
-        left — and their history elsewhere in the platform."""
+        left — and their history elsewhere in the platform.
+
+        @verifies REQ-0021
+        """
         assert member_service.next_member_key(["gl-00001", "gl-00009"]) == "gl-00010"
 
 
@@ -60,13 +69,17 @@ class TestDeliveryPointMerge:
 
     def test_a_second_supply_point_does_not_replace_the_first(self):
         """The whole reason delivery points are a sub-resource: they live in one
-        JSONB column, and a naive whole-field write drops the others."""
+        JSONB column, and a naive whole-field write drops the others.
+
+        @verifies REQ-0027
+        """
         existing = member_service.build_delivery_points([self._dp("IT001")])
         merged = member_service.merge_delivery_point(existing, self._dp("IT002"))
 
         assert [dp["id"] for dp in merged] == ["IT001", "IT002"]
 
     def test_resending_one_updates_rather_than_duplicates(self):
+        """@verifies REQ-0027"""
         existing = member_service.build_delivery_points(
             [self._dp("IT001", description="old")]
         )
@@ -78,6 +91,7 @@ class TestDeliveryPointMerge:
         assert merged[0]["description"] == "new"
 
     def test_removal_keeps_the_others(self):
+        """@verifies REQ-0027"""
         existing = member_service.build_delivery_points(
             [self._dp("IT001"), self._dp("IT002")]
         )
@@ -86,6 +100,7 @@ class TestDeliveryPointMerge:
         ] == ["IT002"]
 
     def test_merge_does_not_mutate_the_input(self):
+        """@verifies REQ-0027"""
         existing = member_service.build_delivery_points([self._dp("IT001")])
         member_service.merge_delivery_point(existing, self._dp("IT002"))
         assert len(existing) == 1
@@ -129,6 +144,7 @@ async def _seed_community(client, key: str = "test-rec", areas=("north", "south"
 @pytest.mark.integration
 class TestMemberWrites:
     async def test_create_returns_the_member(self, live_client):
+        """@verifies REQ-0020"""
         key = await _seed_community(live_client)
 
         r = await live_client.post(
@@ -142,6 +158,7 @@ class TestMemberWrites:
         assert [dp["id"] for dp in body["delivery_points"]] == ["IT001E00000001"]
 
     async def test_supplied_key_is_honoured(self, live_client):
+        """@verifies REQ-0020"""
         key = await _seed_community(live_client)
 
         r = await live_client.post(
@@ -154,7 +171,10 @@ class TestMemberWrites:
 
     async def test_duplicate_key_is_refused(self, live_client):
         """Creating must not silently update: a retry with a changed payload
-        would otherwise rewrite the wrong person."""
+        would otherwise rewrite the wrong person.
+
+        @verifies REQ-0022
+        """
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="gl-00001")
@@ -169,6 +189,7 @@ class TestMemberWrites:
         assert "gl-00001" in r.json()["detail"]
 
     async def test_duplicate_user_id_is_refused(self, live_client):
+        """@verifies REQ-0022"""
         key = await _seed_community(live_client)
         await live_client.post(f"/admin/communities/{key}/members", json=_member_payload())
 
@@ -180,12 +201,14 @@ class TestMemberWrites:
         assert "kc-0001" in r.json()["detail"]
 
     async def test_unknown_community_is_404(self, live_client):
+        """@verifies REQ-0023"""
         r = await live_client.post(
             "/admin/communities/nope/members", json=_member_payload()
         )
         assert r.status_code == 404
 
     async def test_patch_leaves_absent_fields_alone(self, live_client):
+        """@verifies REQ-0024"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -204,6 +227,7 @@ class TestMemberWrites:
         assert [dp["id"] for dp in body["delivery_points"]] == ["IT001E00000001"]
 
     async def test_patch_cannot_steal_another_members_user_id(self, live_client):
+        """@verifies REQ-0024"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -220,6 +244,7 @@ class TestMemberWrites:
         assert r.status_code == 409
 
     async def test_status_transition(self, live_client):
+        """@verifies REQ-0025"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -235,6 +260,7 @@ class TestMemberWrites:
         assert r.json()["extra"]["status_reason"] == "non-payment"
 
     async def test_unknown_status_is_refused(self, live_client):
+        """@verifies REQ-0025"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -252,7 +278,10 @@ class TestDeletion:
     async def test_delete_deactivates_by_default(self, live_client):
         """A member who leaves still has metering history, past consents and
         provenance elsewhere that reference them — and Asset cascades on a real
-        delete, so it would silently take their meters too."""
+        delete, so it would silently take their meters too.
+
+        @verifies REQ-0026
+        """
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -273,6 +302,7 @@ class TestDeletion:
         assert again.status_code == 200
 
     async def test_purge_removes_the_member(self, live_client):
+        """@verifies REQ-0026"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -286,6 +316,7 @@ class TestDeletion:
         assert gone.status_code == 404
 
     async def test_purge_reports_the_assets_it_took(self, live_client):
+        """@verifies REQ-0026"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -311,6 +342,7 @@ class TestDeletion:
 @pytest.mark.integration
 class TestDeliveryPointRoutes:
     async def test_adding_a_second_point_keeps_the_first(self, live_client):
+        """@verifies REQ-0027"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -328,6 +360,7 @@ class TestDeliveryPointRoutes:
         ]
 
     async def test_body_id_must_match_the_path(self, live_client):
+        """@verifies REQ-0027"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -341,6 +374,7 @@ class TestDeliveryPointRoutes:
         assert r.status_code == 422
 
     async def test_removing_an_unknown_point_is_404(self, live_client):
+        """@verifies REQ-0027"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -367,6 +401,7 @@ class TestAssetRoutes:
         }
 
     async def test_upsert_creates_then_replaces(self, live_client):
+        """@verifies REQ-0028"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -381,6 +416,7 @@ class TestAssetRoutes:
         assert r.json()["sensor_id"] == "s-2"
 
     async def test_a_second_asset_does_not_replace_the_first(self, live_client):
+        """@verifies REQ-0028"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -401,7 +437,10 @@ class TestAssetRoutes:
         assert len(listing.json()["items"]) == 2
 
     async def test_wrong_type_for_the_payload_is_refused(self, live_client):
-        """An EV charger must not be storable carrying a heat pump's fields."""
+        """An EV charger must not be storable carrying a heat pump's fields.
+
+        @verifies REQ-0028
+        """
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -419,6 +458,7 @@ class TestAssetRoutes:
         assert r.status_code == 422
 
     async def test_unknown_asset_type_names_the_valid_ones(self, live_client):
+        """@verifies REQ-0028"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -436,6 +476,7 @@ class TestAssetRoutes:
 @pytest.mark.integration
 class TestCommunityWrites:
     async def test_patch_metadata_keeps_areas(self, live_client):
+        """@verifies REQ-0029"""
         key = await _seed_community(live_client)
 
         r = await live_client.patch(
@@ -447,6 +488,7 @@ class TestCommunityWrites:
         assert set(r.json()["areas"]) == {"north", "south"}
 
     async def test_upserting_an_area_keeps_the_others(self, live_client):
+        """@verifies REQ-0029"""
         key = await _seed_community(live_client)
 
         r = await live_client.put(
@@ -458,7 +500,10 @@ class TestCommunityWrites:
 
     async def test_area_in_use_cannot_be_deleted(self, live_client):
         """An orphaned Member.area is a dangling reference nothing else checks;
-        it would surface much later as a member of an area that does not exist."""
+        it would surface much later as a member of an area that does not exist.
+
+        @verifies REQ-0030
+        """
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -470,6 +515,7 @@ class TestCommunityWrites:
         assert "member" in r.json()["detail"]
 
     async def test_unused_area_can_be_deleted(self, live_client):
+        """@verifies REQ-0030"""
         key = await _seed_community(live_client)
 
         r = await live_client.delete(f"/admin/communities/{key}/areas/south")
@@ -488,6 +534,7 @@ class TestNoWriteReducesASibling:
     """
 
     async def test_member_count_survives_every_write(self, live_client):
+        """@verifies REQ-0031"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -537,6 +584,7 @@ class TestRoundTrip:
     approvals, and the two write paths have quietly diverged."""
 
     async def test_api_created_member_survives_export_and_reimport(self, live_client):
+        """@verifies REQ-0037"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members",
@@ -582,6 +630,7 @@ class TestRoundTrip:
 @pytest.mark.integration
 class TestImportGuard:
     async def test_overwriting_a_live_community_is_refused(self, live_client):
+        """@verifies REQ-0033"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")
@@ -602,6 +651,7 @@ class TestImportGuard:
         assert again.status_code == 200
 
     async def test_force_accepts_the_loss(self, live_client):
+        """@verifies REQ-0033"""
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members", json=_member_payload(key="m1")

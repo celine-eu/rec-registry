@@ -211,3 +211,9 @@ __marimo__/
 sources.txt
 skaffold
 taskfile.local.yml
+
+# Execution state: transient, and the plan is what survives
+.agents/work/
+
+# Agent material is not published from this repository.
+.agents/
