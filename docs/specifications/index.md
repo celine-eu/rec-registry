@@ -44,7 +44,7 @@ async def test_a_stranger_is_indistinguishable_from_someone_who_owns_nothing(liv
     """@verifies REQ-0045"""
 ```
 
-The mapping is a projection of the two and is never written by hand. `.agents/harness.toml`
+The mapping is a projection of the two and is never written by hand. the harness profile
 names `provider = "harness"`, so the checker owns it; until that checker is available in
 this checkout the projection is a grep — `--include='*.py'` because `__pycache__` matches
 otherwise:
@@ -59,7 +59,7 @@ naming a requirement that does not exist is a typo — and a typo in a trace tag
 indistinguishable from coverage until someone reads the matrix.
 
 Adding a requirement means adding a `REQ-####` here **and** a test declaring it, in the
-same change. The procedure is in `.agents/playbooks/testing.md`.
+same change. The procedure is in the companion's testing playbook.
 
 ## The requirements
 
@@ -104,5 +104,5 @@ part that belongs to it.
 - **Why** a choice was made — [`docs/decisions/`](../decisions/index.md).
 - What the system *is* — [`docs/data-model.md`](../data-model.md) and
   [`docs/api-reference.md`](../api-reference.md).
-- A trap that is true of the code and not obvious from reading it — `.agents/knowledge/`.
+- A trap that is true of the code and not obvious from reading it — the companion's knowledge.
 - Anything broken — the issue tracker.

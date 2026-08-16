@@ -84,7 +84,7 @@ Each run creates and drops a throwaway `rec_registry_test` schema, so it needs n
 
 A test declares which requirement it covers with a `@verifies REQ-####` tag in its
 docstring; see [the requirements](specifications/index.md) and, for the working procedure,
-`.agents/playbooks/testing.md`.
+the companion's testing playbook.
 
 ## Project Layout
 

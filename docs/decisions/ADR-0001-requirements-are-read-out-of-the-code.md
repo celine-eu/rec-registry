@@ -14,7 +14,7 @@ The gap mattered more here than it would in most of the workspace. Six repositor
 this registry and none of their suites runs against it, so a wrong row here is wrong
 everywhere and nothing downstream can tell. The invariants that keep the rows right — no
 write reduces a sibling, absent never means empty, deactivating is not erasing — were held
-by convention, by prose in `.agents/knowledge/`, and by two named test classes an author
+by convention, by prose in the companion's knowledge, and by two named test classes an author
 had to already know to look for.
 
 Writing requirements needs something to state. The only statement of intent available was
@@ -58,7 +58,7 @@ and a matrix reporting coverage for something nobody verified, which is worse th
 neither, because the matrix is what a reviewer trusts instead of reading the code.
 
 **Distilling found things.** Three defects' worth of drift, and several traps now recorded
-in `.agents/knowledge/`, surfaced only because writing a requirement forces a claim to be
+in the companion's knowledge, surfaced only because writing a requirement forces a claim to be
 either true or false. That is an argument for doing this earlier elsewhere, not an argument
 that this repository was unusually bad.
 

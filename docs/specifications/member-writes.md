@@ -31,7 +31,7 @@ along with whatever history elsewhere in the platform still references that key.
 
 The bound on that guarantee is honest and narrow — the *highest* number is the only state
 consulted, so purging the highest-numbered member does let the next mint reuse their key.
-See `.agents/knowledge/`. `member-00001` and its five-digit padding are arbitrary defaults
+See the companion's knowledge. `member-00001` and its five-digit padding are arbitrary defaults
 rather than chosen ones.
 
 ### REQ-0022 — creating refuses a duplicate key or a duplicate `user_id`
