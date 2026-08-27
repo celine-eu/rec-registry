@@ -1,8 +1,13 @@
 """
-Pydantic schemas for v0.4 Registry Bundle format.
+Pydantic schemas for the registry bundle format.
+
+The models here follow `schemas/community/v0.5/community.schema.json` — the
+`OperatorIn` model and `TopologyNodeIn.operator_id` below are v0.5 additions, so
+the docstring that said v0.4 was describing a shape this file stopped having.
+`core/versions.py` says which version that is; nothing here restates it.
 
 Supports:
-- Community with legal, links, contact, settings, areas, topology
+- Community with legal, links, contact, settings, areas, topology, operators
 - Members with delivery_points
 - Assets with device specifications
 """
@@ -11,6 +16,11 @@ from __future__ import annotations
 
 from typing import Any
 from pydantic import BaseModel, Field, ConfigDict
+
+from celine.rec_registry.core.versions import (
+    CURRENT_SCHEMA_VERSION,
+    MANIFEST_VERSION,
+)
 
 
 # =============================================================================
@@ -328,13 +338,17 @@ class MetadataIn(BaseModel):
 class RegistryBundleIn(BaseModel):
     """
     Complete registry bundle for import.
-    
-    Matches v0.4 structure.
+
+    Matches `schemas/community/v0.5/community.schema.json`.
     """
     model_config = ConfigDict(extra="allow")
 
-    version: str = "1.0"
-    schema_version: str = "1.0"
+    # Both default to what this service currently is, from the one place that
+    # says so. An absent `schema_version` is reported by the importer rather
+    # than silently assumed — a file that does not say which schema it follows
+    # is a file nobody checked.
+    version: str = MANIFEST_VERSION
+    schema_version: str = CURRENT_SCHEMA_VERSION
     metadata: MetadataIn | None = None
     community: CommunityIn
     members: dict[str, MemberIn] = Field(default_factory=dict)

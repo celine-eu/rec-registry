@@ -36,22 +36,17 @@ class TestHealth:
 
 
 class TestVersion:
-    def test_version_reports_an_api_version(self, meta_client):
-        """@verifies REQ-0058"""
-        r = meta_client.get("/version")
+    """`/version` answers what is deployed, not what was typed into a file.
 
-        assert r.status_code == 200
-        assert r.json()["api_version"] == "1.0.0"
+    It used to answer neither: `api_version` was the literal `"1.0.0"` while the
+    package was on 1.5.0, and `schema_version` was `"0.4"`, which matched
+    nothing that existed anywhere. Both are now derived, and these tests are
+    written so that they fail again if either goes back to being a literal —
+    each compares against the source rather than against a copied value.
+    """
 
-    def test_the_api_version_is_hardcoded_and_not_the_package_version(
-        self, meta_client
-    ):
-        """`/version` cannot answer "what is deployed?" — it answers "what was
-        typed into `meta.py`", which has not moved since 1.0.0 while the package
-        is on 1.5.0.
-
-        A defect (celine-eu/rec-registry#38), pinned as current behaviour so that
-        wiring it to the package metadata is a visible three-part change.
+    def test_the_api_version_is_the_installed_package_version(self, meta_client):
+        """Comparing this across two environments has to mean something.
 
         @verifies REQ-0058
         """
@@ -59,24 +54,16 @@ class TestVersion:
 
         reported = meta_client.get("/version").json()["api_version"]
 
-        assert reported == "1.0.0"
-        assert reported != package_version("celine-rec-registry")
+        assert reported == package_version("celine-rec-registry")
 
-    def test_the_reported_schema_version_matches_nothing_that_exists(
+    def test_the_schema_version_is_the_one_the_bundle_model_defaults_to(
         self, meta_client
     ):
-        """Three values live in four places, and this route holds a fourth
-        opinion:
+        """The mismatch this pins used to be the subject: the route said `0.4`
+        and the bundle model defaulted to `1.0`.
 
-        | Place | Says |
-        |---|---|
-        | this route | `0.4` |
-        | `recs/rec-example.yaml`, and every document | `0.5` |
-        | `RegistryBundleIn`'s default | `1.0` |
-        | what the exporter emits | `1.0` |
-
-        They disagree freely because **nothing reads the field** (REQ-0018).
-        Pinned as-is; the mismatch is the subject.
+        They agree now because both read `core/versions.py`, which is the point
+        — four literals is how three opinions happened.
 
         @verifies REQ-0058
         """
@@ -85,6 +72,27 @@ class TestVersion:
         reported = meta_client.get("/version").json()["schema_version"]
         bundle_default = RegistryBundleIn.model_fields["schema_version"].default
 
-        assert reported == "0.4"
-        assert bundle_default == "1.0"
-        assert reported != bundle_default, "the mismatch is closed — update REQ-0058"
+        assert reported == bundle_default
+
+    def test_the_schema_version_is_one_that_exists_on_disk(self, meta_client):
+        """`0.4` was reported for a while, and `1.0` defaulted to, neither of
+        which named a schema in `schemas/community/`.
+
+        @verifies REQ-0058
+        """
+        import pathlib
+
+        reported = meta_client.get("/version").json()["schema_version"]
+        published = pathlib.Path(__file__).parent.parent / "schemas" / "community"
+
+        assert (published / f"v{reported}").is_dir()
+
+    def test_version_answers_without_a_database(self, meta_client):
+        """Same reason as `/health`: it is reached for when things are wrong.
+
+        @verifies REQ-0058
+        """
+        r = meta_client.get("/version")
+
+        assert r.status_code == 200
+        assert set(r.json()) == {"api_version", "schema_version"}

@@ -1,5 +1,5 @@
 """
-Importer service for v0.4 Registry Bundles.
+Importer service for registry bundles.
 
 Implements idempotent replacement import:
 1. Delete existing community by key (cascades to members and assets)
@@ -13,11 +13,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from celine.rec_registry.core.versions import (
+    CURRENT_SCHEMA_VERSION,
+    KNOWN_SCHEMA_VERSIONS,
+)
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.schemas.bundle import (
     RegistryBundleIn,
     AssetCollectionIn,
 )
+
+
+def schema_version_warnings(bundle: RegistryBundleIn) -> list[str]:
+    """Say something when a bundle does not declare the schema this service reads.
+
+    **This reports; it does not refuse.** Refusing would break the one path that
+    matters most here — restoring a backup — and a backup is restored when
+    something has already gone wrong. So an older, unrecognised or absent
+    version still imports, and the caller is told.
+
+    That makes this a report, not a compatibility gate: an incompatible bundle
+    is still accepted and partially applied. What changed is that it is no
+    longer silent about it, which is all the field was ever documented to do.
+    """
+    declared = bundle.schema_version
+
+    if "schema_version" not in bundle.model_fields_set:
+        return [
+            f"Bundle declares no schema_version; read as {CURRENT_SCHEMA_VERSION!r}."
+        ]
+
+    if declared == CURRENT_SCHEMA_VERSION:
+        return []
+
+    if declared in KNOWN_SCHEMA_VERSIONS:
+        return [
+            f"Bundle declares schema_version {declared!r}; this service reads "
+            f"{CURRENT_SCHEMA_VERSION!r}. Imported without conversion — see "
+            f"schemas/community/v{CURRENT_SCHEMA_VERSION}/README.md for what changed."
+        ]
+
+    known = ", ".join(repr(v) for v in KNOWN_SCHEMA_VERSIONS)
+    return [
+        f"Bundle declares schema_version {declared!r}, which is not a published "
+        f"schema (known: {known}). Imported anyway; nothing validated it against "
+        f"{CURRENT_SCHEMA_VERSION!r}."
+    ]
 
 
 def _to_dict(obj: Any) -> dict[str, Any]:
@@ -102,7 +143,9 @@ async def replacement_import_bundle(
     Raises:
         ImportWouldOverwrite: the community exists and force was not set
     """
-    warnings: list[str] = []
+    # Before the dry-run return below, deliberately: a dry run is where a caller
+    # looks to find out whether the file is the one they think it is.
+    warnings: list[str] = schema_version_warnings(bundle)
     community_key = bundle.community.id
 
     # Count what will be deleted

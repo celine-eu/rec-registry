@@ -866,3 +866,102 @@ class TestTwoWritersAtOnce:
         members = listing.json()["items"]
         assert [m["key"] for m in members] == ["gl-00001"]
         assert members[0]["user_id"] == "kc-0001"
+
+
+# =============================================================================
+# The schema version, through the API
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestTheSchemaVersionThroughTheApi:
+    """The two consequences the defect had that a caller could see.
+
+    An export that did not declare what it was, and an import that said nothing
+    about a version it did not understand. Both used to be silent because
+    nothing in the service read the field.
+    """
+
+    @staticmethod
+    def _bundle(key: str, **overrides) -> dict:
+        bundle = {
+            "version": "1.0",
+            "schema_version": "0.5",
+            "community": {
+                "id": key,
+                "name": "Versioned Community",
+                "areas": {"north": {"name": "north"}},
+            },
+            "members": {},
+        }
+        bundle.update(overrides)
+        return bundle
+
+    async def test_an_export_declares_the_current_schema_version(self, live_client):
+        """It declared `1.0`, which named no schema that has ever existed — so an
+        export was not a faithful backup in the one field whose job is to say
+        what shape the rest is.
+
+        @verifies REQ-0018
+        """
+        import yaml
+
+        from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
+
+        key = await _seed_community(live_client)
+
+        exported = await live_client.get(f"/admin/export?community_key={key}")
+        assert exported.status_code == 200, exported.text
+        bundle = yaml.safe_load(exported.text)
+
+        assert bundle["schema_version"] == CURRENT_SCHEMA_VERSION
+
+    async def test_the_current_version_imports_without_comment(self, live_client):
+        """@verifies REQ-0018"""
+        r = await live_client.post(
+            "/admin/import",
+            json={"bundle": self._bundle("quiet-rec"), "dry_run": False},
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == []
+
+    async def test_an_older_version_is_reported_and_still_imported(self, live_client):
+        """Reported, not refused: restoring a backup is the path a refusal would
+        break, and a backup is restored when something has already gone wrong.
+
+        @verifies REQ-0018
+        """
+        r = await live_client.post(
+            "/admin/import",
+            json={
+                "bundle": self._bundle("old-rec", schema_version="0.4"),
+                "dry_run": False,
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        assert any("0.4" in w for w in r.json()["warnings"])
+
+        listed = await live_client.get("/admin/communities/old-rec")
+        assert listed.status_code == 200, "reported, but not imported"
+
+    async def test_a_dry_run_reports_it_before_anything_is_written(self, live_client):
+        """A dry run is where a caller looks to find out whether the file is the
+        one they think it is, so the warning has to reach them there.
+
+        @verifies REQ-0018
+        """
+        r = await live_client.post(
+            "/admin/import",
+            json={
+                "bundle": self._bundle("dry-rec", schema_version="not-a-version"),
+                "dry_run": True,
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        assert any("not-a-version" in w for w in r.json()["warnings"])
+
+        listed = await live_client.get("/admin/communities/dry-rec")
+        assert listed.status_code == 404, "a dry run wrote something"

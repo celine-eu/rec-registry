@@ -50,22 +50,20 @@ That independence is the requirement, and it is also the limitation — **this e
 becoming green says nothing about the service being able to serve a request.** There is no
 readiness check that does.
 
-### REQ-0058 — version reporting is decorative
+### REQ-0058 — `/version` answers what is deployed
 
-`GET /version` answers `api_version` and `schema_version`. Both are string literals in
-`api/meta.py`, and neither is derived from anything:
+`GET /version` answers `api_version` and `schema_version`, and both are derived:
 
-- **`api_version` is `"1.0.0"`** while the package is on 1.5.0. It has not moved in five
-  minor releases, so comparing it across two environments cannot tell you they differ.
-- **`schema_version` is `"0.4"`**, which matches nothing that exists — the documents and
-  the example bundle say `0.5`, the bundle model defaults to `1.0`, and the exporter emits
-  `1.0` (REQ-0018).
+- **`api_version`** is the installed distribution's version, from `importlib.metadata`. It
+  was the literal `"1.0.0"` while the package was on 1.5.0, so comparing it across two
+  environments could not tell you they differed — which is the only thing the field is for.
+  A distribution that cannot be found answers `0.0.0+unknown` rather than raising: this
+  route is reached for when something is already wrong.
+- **`schema_version`** is `CURRENT_SCHEMA_VERSION` from `core/versions.py`, the same
+  constant the bundle model, the exporter and the importer read (REQ-0018). It was `"0.4"`,
+  which matched nothing anywhere.
 
-So the one route whose job is to answer *"what is deployed?"* answers *"what was typed
-into a file"*. This is a defect —
-[#38](https://github.com/celine-eu/rec-registry/issues/38) — and it is described here as
-it behaves. Its tests assert the **mismatch**, so closing it turns them red deliberately,
-and fixing it means changing the code, this requirement and those tests together.
+The route still answers with no database, for the same reason `/health` does.
 
 ---
 
@@ -78,6 +76,8 @@ and fixing it means changing the code, this requirement and those tests together
 - **Startup.** `create_app` wiring, settings loading, and the policy engine's bundle load
   at boot. A service that starts with an unloadable Rego bundle is not something any test
   here would notice.
-- **The migrations.** Alembic is not exercised by any test — the suite builds its schema
-  from `Base.metadata` — so a model that has drifted from `alembic/versions/` passes
-  everything and fails on deployment.
+- **`downgrade`, and migrating a database that holds rows.**
+  `tests/test_migrations.py` runs `alembic upgrade head` into a throwaway schema and
+  compares it to `Base.metadata`, so a model that has drifted from `alembic/versions/` no
+  longer passes. It builds an empty schema and never goes back down, so what a revision
+  does to existing rows is still nobody's test.

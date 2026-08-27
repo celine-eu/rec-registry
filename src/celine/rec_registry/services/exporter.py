@@ -12,6 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from celine.rec_registry.db.models import Community, Member, Asset
+from celine.rec_registry.core.versions import (
+    CURRENT_SCHEMA_VERSION,
+    MANIFEST_VERSION,
+)
 from celine.rec_registry.core.yaml_io import dump_yaml
 
 
@@ -116,8 +120,13 @@ async def export_community_bundle(
 
     # Build bundle
     bundle: dict[str, Any] = {
-        "version": "1.0",
-        "schema_version": "1.0",
+        # The version of the document being written, not the version of the
+        # bundle some of these rows arrived in. An export is built from today's
+        # model, so it conforms to today's schema whatever it was imported as —
+        # stamping the older number on it would be a more convincing lie than
+        # the `1.0` that used to be here, which matched nothing at all.
+        "version": MANIFEST_VERSION,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "metadata": {
             "created": (
                 community.created_at.strftime("%Y-%m-%d")

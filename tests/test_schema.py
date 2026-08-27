@@ -5,7 +5,9 @@ Schema validation tests — parse rec-example.yaml and assert shape correctness.
 import pytest
 from pydantic import ValidationError
 
+from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
 from celine.rec_registry.schemas.bundle import MemberIn, RegistryBundleIn
+from celine.rec_registry.services.importer import schema_version_warnings
 
 
 class TestBundleParsing:
@@ -105,22 +107,23 @@ class TestBundleParsing:
         assert dp.active is True
 
 
-class TestTheSchemaVersionIsDecorative:
-    """`schema_version` is carried, never checked, and disagreed about.
+class TestTheSchemaVersionIsReadAndReported:
+    """`schema_version` is read, reported, and never a reason to refuse.
 
-    The bundle is described everywhere as the versioned contract — it is the
-    thing with a version number on it, and the reason write requests reuse its
-    `*In` models rather than declaring parallel shapes. That reasoning survives;
-    the *enforcement* does not exist.
+    It used to be read by nothing, which is exactly why four places held three
+    opinions about its value: a field nobody reads has nothing holding its
+    copies to each other. Now one module says what the current version is and
+    everything else asks it.
 
-    Nothing in the service reads the field, which is exactly why four places
-    hold three opinions about its value (REQ-0058). Stated here as behaviour so
-    that a future version gate is a change against a known baseline rather than
-    a surprise.
+    What deliberately did **not** change: no value is refused. An older,
+    unrecognised or absent version still imports and the caller is told, because
+    refusing breaks restoring a backup — and a backup is restored when something
+    has already gone wrong. This is a report, not a compatibility gate, and the
+    tests below say so in both directions.
     """
 
-    def test_any_value_at_all_is_accepted(self):
-        """A v0.4 bundle, a v0.5 bundle and a nonsense one import alike.
+    def test_any_value_at_all_is_still_accepted(self):
+        """A v0.4 bundle, a v0.5 bundle and a nonsense one all still parse.
 
         @verifies REQ-0018
         """
@@ -134,24 +137,89 @@ class TestTheSchemaVersionIsDecorative:
             )
             assert bundle.schema_version == declared
 
-    def test_an_absent_version_defaults_rather_than_refusing(self):
-        """@verifies REQ-0018"""
+    def test_an_absent_version_defaults_to_the_current_one(self):
+        """It defaulted to `1.0`, which named no schema that has ever existed.
+
+        @verifies REQ-0018
+        """
         bundle = RegistryBundleIn(
             **{"community": {"id": "v", "name": "V", "areas": {}}, "members": {}}
         )
 
-        assert bundle.schema_version == "1.0"
+        assert bundle.schema_version == CURRENT_SCHEMA_VERSION
 
-    def test_the_example_bundle_declares_a_version_nothing_emits(
+    def test_the_example_bundle_declares_what_an_export_would_emit(
         self, example_bundle
     ):
-        """The example says `0.5`; an export of it would say `1.0`. Round-tripping
-        a bundle does not preserve the version it declared.
+        """The example said `0.5` and an export said `1.0`, so a round trip did
+        not preserve the one field whose job is to describe the shape of the
+        rest. Both now read the same constant.
 
         @verifies REQ-0018
         """
-        assert example_bundle.schema_version == "0.5"
-        assert RegistryBundleIn.model_fields["schema_version"].default == "1.0"
+        assert example_bundle.schema_version == CURRENT_SCHEMA_VERSION
+        assert (
+            RegistryBundleIn.model_fields["schema_version"].default
+            == CURRENT_SCHEMA_VERSION
+        )
+
+    def test_the_current_version_is_silent(self):
+        """@verifies REQ-0018"""
+        bundle = RegistryBundleIn(
+            **{
+                "schema_version": CURRENT_SCHEMA_VERSION,
+                "community": {"id": "v", "name": "V", "areas": {}},
+                "members": {},
+            }
+        )
+
+        assert schema_version_warnings(bundle) == []
+
+    def test_an_older_published_version_is_warned_about_not_refused(self):
+        """`0.4` is a real schema in `schemas/community/`, and v0.5 removed
+        fields from it. Importing one is a thing somebody may have to do; doing
+        it without being told is not.
+
+        @verifies REQ-0018
+        """
+        bundle = RegistryBundleIn(
+            **{
+                "schema_version": "0.4",
+                "community": {"id": "v", "name": "V", "areas": {}},
+                "members": {},
+            }
+        )
+
+        (warning,) = schema_version_warnings(bundle)
+        assert "0.4" in warning
+        assert CURRENT_SCHEMA_VERSION in warning
+
+    def test_an_unpublished_version_is_warned_about_not_refused(self):
+        """@verifies REQ-0018"""
+        bundle = RegistryBundleIn(
+            **{
+                "schema_version": "not-a-version",
+                "community": {"id": "v", "name": "V", "areas": {}},
+                "members": {},
+            }
+        )
+
+        (warning,) = schema_version_warnings(bundle)
+        assert "not-a-version" in warning
+
+    def test_an_absent_version_is_warned_about_rather_than_assumed_silently(self):
+        """The default is a reading, not a declaration, and the two are worth
+        telling apart: a file that does not say which schema it follows is a
+        file nobody checked.
+
+        @verifies REQ-0018
+        """
+        bundle = RegistryBundleIn(
+            **{"community": {"id": "v", "name": "V", "areas": {}}, "members": {}}
+        )
+
+        (warning,) = schema_version_warnings(bundle)
+        assert "no schema_version" in warning
 
 
 class TestBundleValidation:

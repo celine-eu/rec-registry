@@ -80,30 +80,39 @@ They live in one JSONB column on the member, which is the reason every write tou
 merges by identity rather than replacing the field (REQ-0027) — and the reason they are
 absent from the patch model entirely.
 
-### REQ-0018 — the schema version is carried, never checked, and disagreed about
+### REQ-0018 — the schema version is read and reported, and never refuses
 
-`version` and `schema_version` are accepted on a bundle, defaulted to `"1.0"` when absent,
-and **read by nothing**. A bundle declaring `0.4`, `0.5` or `not-a-version` imports
-identically.
+`schema_version` says which schema under `schemas/community/` a bundle conforms to;
+`version` says the format of the envelope around it. They are different questions, and
+conflating them is how `1.0` — an envelope version — came to sit in the `schema_version`
+slot.
 
-Four places hold three opinions about what the current version is:
+**One place holds the current value.** `core/versions.py` carries `MANIFEST_VERSION`,
+`CURRENT_SCHEMA_VERSION` and `KNOWN_SCHEMA_VERSIONS`; `GET /version`, the bundle model's
+defaults, the exporter and the importer all read it. They used to hold four literals, which
+is how they came to hold three different opinions — a value nobody reads has nothing
+holding its copies to each other.
 
-| Place | Says |
-|---|---|
-| `GET /version` | `0.4` |
-| `recs/rec-example.yaml`, and every document under `docs/` | `0.5` |
-| `RegistryBundleIn`'s default | `1.0` |
-| what `src/celine/rec_registry/services/exporter.py` emits | `1.0` |
+**Import reports, and does not refuse.** A bundle declaring an older published version, an
+unpublished one, or none at all is imported, and the caller is told in the `warnings` of
+its `ImportReport`. The warning is produced before the `dry_run` return, so a dry run shows
+it — that is where a caller looks to find out whether the file is the one they think it is.
 
-They drifted freely *because* nothing reads the field. One consequence is worth stating
-separately: **an export does not preserve the version its import declared** — a `0.5`
-bundle exports as `1.0` — so an export is not a faithful backup in the one field whose job
-is to describe the shape of the rest.
+This is deliberately **not** a compatibility gate: an incompatible bundle is still accepted
+and partially applied. Refusing would break restoring a backup, and a backup is restored
+when something has already gone wrong. What changed is that it is no longer silent.
 
-This is a defect — [#38](https://github.com/celine-eu/rec-registry/issues/38) — and it is
-stated here as behaviour rather than as the intended version gate, because the gate does
-not exist and a requirement describing it would report coverage for something nobody
-verified. Fixing it means changing the code, this requirement and its tests together.
+**An export declares the version it emits**, not the version its rows arrived under. An
+export is built from today's model, so it conforms to today's schema whatever it was
+imported as; stamping the older number on a document written in the newer shape would be a
+more convincing lie than the `1.0` it used to carry. A round trip of a current bundle
+therefore comes back declaring exactly what it declared going in.
+
+**The published schemas are not enforced.** `schemas/community/v0.4/community.schema.json`
+and `v0.5/` are documentation: there is no `jsonschema` dependency and nothing in `src/`
+reads them. `CURRENT_SCHEMA_VERSION` is written down rather than derived from that
+directory, because `schemas/` does not ship in the Docker image — `tests/test_versions.py`
+holds the constant to the directory in the repository instead.
 
 ### REQ-0019 — a bundle missing a required field is refused rather than defaulted
 

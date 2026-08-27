@@ -20,20 +20,24 @@ through SDK wrappers that are not in a published release yet. `../dataset-api` u
 membership to decide access — so a member wrongly deactivated here is a member who cannot
 see their own data there, and the error surfaces three repositories away from its cause.
 
-## Two of them describe defects
+## One of them describes a defect
 
-They are written as behaviour anyway. A requirement describing the *intended* behaviour
-would be an unverified wish, and the trace matrix would report it as covered. Each names
-its issue, and fixing one means changing the code, its requirement and its test in the
-same change.
+It is written as behaviour anyway. A requirement describing the *intended* behaviour would
+be an unverified wish, and the trace matrix would report it as covered. It names its issue,
+and fixing it means changing the code, the requirement and its test in the same change.
 
 | | | |
 |---|---|---|
 | REQ-0043 | `assets-by-sensor-ids` carries no bound, while its sibling caps at 500 | [#37](https://github.com/celine-eu/rec-registry/issues/37) |
-| REQ-0018, REQ-0058 | version reporting is decorative — four places, three values, nothing validated | [#38](https://github.com/celine-eu/rec-registry/issues/38) |
 
-Their tests assert the **mismatch**, not the intended value, so closing either defect
-turns them red deliberately rather than leaving a test that passes for the wrong reason.
+Its tests assert the **mismatch**, not the intended value, so closing the defect turns them
+red deliberately rather than leaving a test that passes for the wrong reason.
+
+REQ-0018 and REQ-0058 were the second entry here — version reporting, four places holding
+three values with nothing reading the field
+([#38](https://github.com/celine-eu/rec-registry/issues/38)). Closed: both now describe
+what the code does rather than what it fails to do, and their tests went red on the way, as
+this section says they would.
 
 ## How a requirement is verified
 
