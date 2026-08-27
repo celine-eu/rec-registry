@@ -43,11 +43,18 @@ switch to `PATCH`.
 shape of a client reconnecting — would otherwise rewrite the wrong person's row, and
 `user_id` is the field that would attach one participant's identity to another's meters.
 
-Both checks are **application-level, not database constraints**: `member` carries no
-unique index on `key` or `user_id`, within a community or across the registry. Two
-concurrent creates naming the same key can therefore both pass the check and both insert.
-The window is small and the writers are few — `../onboarding` and an operator — but the
-guarantee is "refused when observed", not "impossible".
+**Two writers at once get the same answer.** The check is application-level and the
+message is its work, but `member` carries unique indexes on `(community_id, key)` and
+`(community_id, user_id)`, so a create that passes the check because the clashing row was
+not committed yet is refused by the index instead — and that refusal is translated back
+into the same `409`. A caller cannot tell a race from an ordinary duplicate, and the loser
+leaves no row behind.
+
+The same holds for `PATCH` reassigning a `user_id` (REQ-0024): its clash check is equally
+blind to an uncommitted row, and equally backed.
+
+The guarantee is per community, not registry-wide — one person may hold the same `user_id`
+in two communities, which is what makes membership of several possible.
 
 ### REQ-0023 — a write naming an unknown community is `404`
 
@@ -67,7 +74,8 @@ sub-resource (REQ-0027). Adding the field to the patch model is a data-loss bug,
 convenience — the absence is load-bearing.
 
 A patch moving `user_id` to one already held by another member of the community answers
-`409`.
+`409` — including when the holder's row was written concurrently and the clash check could
+not see it yet, which the unique index behind REQ-0022 is what catches.
 
 ### REQ-0025 — a status change is its own route, and records why
 

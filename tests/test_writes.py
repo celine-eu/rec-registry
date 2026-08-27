@@ -15,7 +15,11 @@ The rules these tests pin are the ones that are easy to lose:
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from celine.rec_registry.schemas.bundle import DeliveryPointIn, MemberIn
 from celine.rec_registry.services import members as member_service
@@ -670,3 +674,195 @@ class TestImportGuard:
         assert r.status_code == 200
         gone = await live_client.get(f"/admin/communities/{key}/members/m1")
         assert gone.status_code == 404
+
+
+# =============================================================================
+# Two writers at once
+# =============================================================================
+#
+# The application check in `create_member` and `patch_member` produces the `409`
+# and its message; the unique indexes on `member` are what make that answer true
+# when two writers overlap — a retried enablement step, an operator and a service
+# account, two replicas. Neither can see the other's uncommitted row, so both
+# pass the check and the database refuses the second.
+#
+# These tests hold the first writer open deliberately rather than racing two
+# requests and hoping: a race that resolves the other way passes through the
+# application check and proves nothing about the path being tested.
+
+
+async def _wait_until_blocked(engine, holder_pid: int, *, timeout: float = 10.0) -> None:
+    """Wait until some backend is waiting on a lock held by `holder_pid`.
+
+    Polling the server rather than sleeping a guessed interval, and filtering on
+    the holder rather than counting blocked backends anywhere: `pg_stat_activity`
+    spans the cluster, and this suite is not the only thing that may be using it.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+
+    async with engine.connect() as conn:
+        while loop.time() < deadline:
+            waiting = await conn.scalar(
+                text(
+                    "select count(*) from pg_stat_activity "
+                    "where :holder = any(pg_blocking_pids(pid))"
+                ),
+                {"holder": holder_pid},
+            )
+            if waiting:
+                return
+            await asyncio.sleep(0.01)
+
+    raise AssertionError(
+        f"no backend ever waited on pid {holder_pid}; the second writer did not "
+        "reach the unique index, so this test would pass for the wrong reason"
+    )
+
+
+@pytest.mark.integration
+class TestTwoWritersAtOnce:
+    async def test_a_concurrent_duplicate_key_is_a_409_not_a_500(
+        self, live_client, pg_engine
+    ):
+        """The loser of a create race gets the same answer as a caller who was
+        simply late: the unique index refuses the insert, and that is translated
+        back into the conflict the check would have raised.
+
+        @verifies REQ-0022
+        """
+        key = await _seed_community(live_client)
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            await member_service.create_member(
+                holder,
+                community,
+                MemberIn(**_member_payload(user_id="kc-0001")),
+                key="gl-00001",
+            )
+            # Flushed, not committed: invisible to the request below, and already
+            # holding the index entry that request is about to want.
+
+            request = asyncio.create_task(
+                live_client.post(
+                    f"/admin/communities/{key}/members",
+                    json=_member_payload(key="gl-00001", user_id="kc-0002"),
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            r = await request
+
+        assert r.status_code == 409, r.text
+        assert "gl-00001" in r.json()["detail"]
+
+    async def test_a_concurrent_duplicate_user_id_is_a_409_not_a_500(
+        self, live_client, pg_engine
+    ):
+        """`user_id` is the field that would attach one participant's identity to
+        another's meters, so the race that matters most is this one.
+
+        @verifies REQ-0022
+        """
+        key = await _seed_community(live_client)
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            await member_service.create_member(
+                holder,
+                community,
+                MemberIn(**_member_payload(user_id="kc-0001")),
+                key="gl-00001",
+            )
+
+            request = asyncio.create_task(
+                live_client.post(
+                    f"/admin/communities/{key}/members",
+                    json=_member_payload(key="gl-00002", user_id="kc-0001"),
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            r = await request
+
+        assert r.status_code == 409, r.text
+        assert "kc-0001" in r.json()["detail"]
+
+    async def test_a_concurrent_user_id_reassignment_is_a_409_not_a_500(
+        self, live_client, pg_engine
+    ):
+        """The same race on `PATCH`: two members moved onto one `user_id`, each
+        writer's clash check blind to the other.
+
+        @verifies REQ-0024
+        """
+        key = await _seed_community(live_client)
+        for member_key, user_id in (("m1", "kc-0001"), ("m2", "kc-0002")):
+            r = await live_client.post(
+                f"/admin/communities/{key}/members",
+                json=_member_payload(key=member_key, user_id=user_id),
+            )
+            assert r.status_code == 201, r.text
+
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            m1 = await member_service.resolve_member(holder, community, "m1")
+            m1.user_id = "kc-9999"
+            await holder.flush()
+
+            request = asyncio.create_task(
+                live_client.patch(
+                    f"/admin/communities/{key}/members/m2",
+                    json={"user_id": "kc-9999"},
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            r = await request
+
+        assert r.status_code == 409, r.text
+        assert "kc-9999" in r.json()["detail"]
+
+    async def test_the_loser_of_a_create_race_leaves_no_row_behind(
+        self, live_client, pg_engine
+    ):
+        """A refused create must roll back cleanly, or the community is left with
+        a half-written member and the next read has to guess.
+
+        @verifies REQ-0022
+        """
+        key = await _seed_community(live_client)
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            await member_service.create_member(
+                holder,
+                community,
+                MemberIn(**_member_payload(user_id="kc-0001")),
+                key="gl-00001",
+            )
+
+            request = asyncio.create_task(
+                live_client.post(
+                    f"/admin/communities/{key}/members",
+                    json=_member_payload(key="gl-00001", user_id="kc-0002"),
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            assert (await request).status_code == 409
+
+        listing = await live_client.get(f"/admin/communities/{key}/members")
+        assert listing.status_code == 200, listing.text
+        members = listing.json()["items"]
+        assert [m["key"] for m in members] == ["gl-00001"]
+        assert members[0]["user_id"] == "kc-0001"

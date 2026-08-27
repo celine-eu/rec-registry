@@ -96,8 +96,11 @@ part that belongs to it.
   `MAX_PAGE_SIZE` is not exercised at all.
 - **The exporter, directly.** It is covered only through the round trip (REQ-0037), which
   means its output is verified as *re-importable* and never as *correct*.
-- **Concurrency.** Uniqueness of a member key and `user_id` is checked in application code
-  with no database constraint behind it (REQ-0022); nothing tests two writers at once.
+- **Concurrency, beyond member uniqueness.** Two writers racing on a member `key` or
+  `user_id` are covered (REQ-0022) — constraint, translation and test. No other overlapping
+  write is. `asset` carries the same unique index on `(community_id, key)` and nothing
+  translates it, so two callers creating one asset key at once still answer `500`; two
+  upserting an area resolve by last-writer-wins, unchecked.
 
 ## What is not here
 

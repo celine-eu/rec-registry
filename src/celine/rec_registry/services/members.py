@@ -15,6 +15,12 @@ The rules these functions keep, in one place because they are easy to lose:
   default is ``status = inactive``.
 * **JSONB collections merge by identity, not by position.** A member gaining a
   second supply point must not lose the first.
+* **The application check produces the message; the database makes it true.**
+  ``member`` carries unique indexes on ``(community_id, key)`` and
+  ``(community_id, user_id)``, so two writers whose pre-checks both pass — neither
+  can see the other's uncommitted row — do not both insert. The loser's
+  ``IntegrityError`` is translated back into the same ``MemberConflict`` the check
+  raises, so a race and an observed duplicate are indistinguishable to a caller.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import re
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from celine.rec_registry.db.models import Asset, Community, Member
@@ -51,6 +58,7 @@ __all__ = [
     "build_member_extra",
     "create_assets_for_member",
     "create_member",
+    "member_conflict_from",
     "merge_delivery_point",
     "next_member_key",
     "remove_delivery_point",
@@ -82,6 +90,37 @@ class MemberConflict(Exception):
 
 class MemberNotFound(Exception):
     """No such member in this community."""
+
+
+# The unique indexes behind the two application-level checks. Named rather than
+# matched loosely, so an unrelated constraint failure is not reported as
+# "already exists" — a misleading 409 is worse than a 500 that claims nothing.
+_MEMBER_KEY_CONSTRAINT = "uq_member_community_key"
+_MEMBER_USER_ID_CONSTRAINT = "uq_member_community_user_id"
+
+
+def member_conflict_from(
+    exc: IntegrityError, *, key: str | None = None, user_id: str | None = None
+) -> MemberConflict | None:
+    """Translate a member unique-violation into the conflict the checks raise.
+
+    The pre-checks in `create_member` and `patch_member` cannot see an
+    uncommitted row, so two concurrent writers both pass them and the database
+    refuses the second. Without this the caller gets a `500` for something the
+    API already has a `409` for.
+
+    Returns ``None`` when the violation is not one of the two member unique
+    indexes; the caller re-raises rather than guessing.
+    """
+    detail = str(getattr(exc, "orig", exc))
+
+    if _MEMBER_KEY_CONSTRAINT in detail:
+        return MemberConflict(f"Member {key!r} already exists in this community")
+    if _MEMBER_USER_ID_CONSTRAINT in detail:
+        return MemberConflict(
+            f"A member with user_id {user_id!r} already exists in this community"
+        )
+    return None
 
 
 # ── lookups ───────────────────────────────────────────────────────────────────
@@ -201,6 +240,9 @@ async def create_member(
     Refuses a duplicate ``key`` or ``user_id`` rather than overwriting: the
     caller asked to create, and silently updating somebody else's row is how a
     retry with a changed payload rewrites the wrong person.
+
+    Raises ``MemberConflict`` whether the duplicate was seen by the check below
+    or refused by the unique index underneath it.
     """
     existing = (
         await session.scalars(select(Member).where(Member.community_id == community.id))
@@ -229,7 +271,17 @@ async def create_member(
         extra=build_member_extra(member_in),
     )
     session.add(member)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # A writer got here first between the check above and this insert. The
+        # transaction is dead either way, and this function has one caller, which
+        # answers 409 and does nothing else with the session.
+        await session.rollback()
+        conflict = member_conflict_from(exc, key=key, user_id=member_in.user_id)
+        if conflict is None:
+            raise
+        raise conflict from exc
 
     warnings: list[str] = []
     if member_in.assets:

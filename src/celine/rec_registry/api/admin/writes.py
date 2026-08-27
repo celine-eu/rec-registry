@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import ValidationError
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from celine.rec_registry.db.models import Asset, Community, Member
@@ -115,6 +116,9 @@ async def create_member(
     existing key so a caller can switch to `PATCH`. It does not overwrite: the
     caller asked to create, and silently updating somebody else's row is how a
     retry with a changed payload rewrites the wrong person.
+
+    A concurrent create answers `409` too — the unique index refuses it, and the
+    service translates that back into the same conflict.
     """
     community, _ = await _resolve(session, community_key)
 
@@ -150,7 +154,11 @@ async def patch_member(
     payload: MemberPatch,
     session: AsyncSession = Depends(get_session),
 ):
-    """Partially update a member. Absent fields are left alone."""
+    """Partially update a member. Absent fields are left alone.
+
+    Reassigning a `user_id` that belongs to somebody else is `409`, whether the
+    clash was already committed or arrives concurrently.
+    """
     community, member = await _resolve(session, community_key, member_key)
 
     patch = payload.model_dump(exclude_unset=True)
@@ -175,7 +183,19 @@ async def patch_member(
             )
 
     await member_service.apply_member_patch(member, patch)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # The clash check above cannot see a row another writer has not committed
+        # yet, so the unique index is what refuses this one. Same answer either way.
+        await session.rollback()
+        conflict = member_service.member_conflict_from(
+            exc, key=member_key, user_id=patch.get("user_id")
+        )
+        if conflict is None:
+            raise
+        raise HTTPException(status_code=409, detail=str(conflict)) from exc
+
     await session.refresh(member)
     return _member_detail(member)
 
