@@ -240,7 +240,22 @@ async def lookup_assets_by_sensor_ids(
     body: SensorIdsBatchRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find assets by multiple sensor_ids across all communities."""
+    """Find assets by multiple sensor_ids across all communities.
+
+    The mirror of ``assets-by-user-ids``: this one starts from a device and
+    finds its owner, that one starts from owners and finds their devices.
+
+    **Bounded**, at the same 500 as its sibling. Both are reachable by anything
+    holding ``rec-registry.lookup``, and a caller that can name ten thousand
+    sensors in one request has a dump of the registry rather than a lookup.
+
+    **A sensor id that matches nothing contributes no row** rather than failing
+    the request: the caller asked about a set, and one absent member of it does
+    not make the rest unanswerable.
+    """
+    if not body.sensor_ids:
+        return []
+
     result = await session.execute(
         select(Asset, Member, Community)
         .join(Member, Asset.owner_id == Member.id)

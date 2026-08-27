@@ -9,8 +9,10 @@ and nothing else; a dataset request arrives carrying a user id. The caller canno
 either to a community without asking, and six repositories ask.
 
 Two of these requirements are security properties wearing the clothes of ordinary
-behaviour: the batch form is **bounded** (REQ-0045), and none of it is an **enumeration
-oracle** (REQ-0045). Both are easy to undo while making the endpoint more useful.
+behaviour: **both** batch forms are bounded, at one shared number (REQ-0043, REQ-0045), and
+none of it is an **enumeration oracle** (REQ-0045). Both properties are easy to undo while
+making the endpoint more useful, and one of them already was — `assets-by-sensor-ids`
+carried no bound at all until the two were made to read the same constant.
 
 ---
 
@@ -54,25 +56,30 @@ The wider sibling of REQ-0038: that one answers *where*, this one answers *what*
 device and relationships, plus `owner_key`, `owner_user_id` and the community. Unknown is
 `404`.
 
-### REQ-0043 — sensor ids can be resolved in a batch, and that batch is unbounded
+### REQ-0043 — sensor ids can be resolved in a batch, and that batch is bounded
 
 `POST /admin/lookup/assets-by-sensor-ids` resolves many sensor ids in one request,
-answering one record per asset found.
+answering one record per asset found. An empty list answers an empty list without querying.
 
 A sensor id that matches nothing **contributes no row** rather than failing the request:
 the caller asked about a set, and one absent member of it does not make the rest
 unanswerable.
 
-**The request carries no bound at all**, unlike its sibling REQ-0045 which caps at 500.
-The asymmetry is accidental — the bound arrived with the newer endpoint and was not
-applied to this one — and it is a defect,
-[#37](https://github.com/celine-eu/rec-registry/issues/37). Sensor ids are less guessable
-than usernames, which makes this weaker as an enumeration path but not as a bulk
-extraction one: a caller holding a list of sensor ids can resolve all of them, with their
-owners and communities, in one request of unlimited size.
+**Bounded:** at most 500 sensor ids in one request; 501 is `422` and 500 is accepted. The
+same number as REQ-0045, from the same constant — `MAX_BATCH_LOOKUP_IDS`, which both
+request models read. This route carried no bound at all while its sibling capped at 500,
+and the asymmetry was accidental: the bound arrived with the newer endpoint and was not
+applied to this one. Two literals would have let that happen again.
 
-Stated as current behaviour so that adding the bound is a visible three-part change —
-code, this requirement, its test — rather than a silent one.
+Sensor ids are less guessable than usernames, which made this the weaker *enumeration*
+path — but not the weaker *bulk extraction* one, and extraction is what a bound is for: a
+caller holding a list of sensor ids resolves every owner and community behind them in one
+request.
+
+**A bound on one request is not a bound on extraction.** Nothing rate-limits this route and
+nothing counts what one caller has resolved over an hour, so a caller who wants the
+registry can still page through it 500 at a time. What the bound removes is the single
+request that takes all of it.
 
 ### REQ-0044 — assets can be resolved for a set of members, and every row names its owner
 

@@ -388,8 +388,27 @@ class UserDeliveryPointsResponse(BaseModel):
     items: list[DeliveryPoint]
     total: int
 
+# One number, read by both batch models. Writing it twice is how the two came to
+# disagree in the first place — the bound arrived with the newer endpoint and was
+# not applied to the older one, and nothing about two literals would have stopped
+# that happening again.
+#
+# The value is arbitrary; what is load-bearing is that a bound exists. Raising it
+# widens a data-exfiltration path — it is a security decision wearing the clothes
+# of a validation constant.
+MAX_BATCH_LOOKUP_IDS = 500
+
+
 class SensorIdsBatchRequest(BaseModel):
-    sensor_ids: list[str]
+    """Sensors to resolve owners for.
+
+    Bounded for the same reason as its sibling below, and by the same number.
+    Sensor ids are less guessable than usernames, which makes this the weaker
+    enumeration path — but not the weaker *bulk extraction* one: a caller
+    holding a list of them resolves every owner and community in one request.
+    """
+
+    sensor_ids: list[str] = Field(..., max_length=MAX_BATCH_LOOKUP_IDS)
 
 
 class UserIdsBatchRequest(BaseModel):
@@ -400,7 +419,7 @@ class UserIdsBatchRequest(BaseModel):
     reachable by anything holding `rec-registry.lookup`.
     """
 
-    user_ids: list[str] = Field(..., max_length=500)
+    user_ids: list[str] = Field(..., max_length=MAX_BATCH_LOOKUP_IDS)
 
 # =============================================================================
 # Write requests (Admin)

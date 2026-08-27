@@ -8,8 +8,10 @@ the caller can map to a community on its own.
 Two properties are worth more than the routes themselves, and both are security
 properties wearing the clothes of ordinary behaviour:
 
-* **the batch form is bounded** — a caller that can name ten thousand people in
-  one request has a dump of the registry, not a lookup;
+* **both batch forms are bounded, by one shared constant** — a caller that can
+  name ten thousand people in one request has a dump of the registry, not a
+  lookup, and the sensor batch carried no bound at all until the two were made
+  to read the same number;
 * **it is not an enumeration oracle** — a user id that does not exist and a
   member who owns nothing are deliberately indistinguishable, so the endpoint
   cannot be used to discover who is registered.
@@ -240,12 +242,24 @@ class TestAssetsBySensorIds:
         assert r.status_code == 200
         assert [a["sensor_id"] for a in r.json()] == ["sen-alice"]
 
-    async def test_it_carries_no_bound(self, live_client):
-        """Pins the asymmetry with `assets-by-user-ids`, which caps at 500.
+    async def test_an_empty_request_returns_an_empty_list(self, live_client):
+        """@verifies REQ-0043"""
+        await _seed(live_client)
 
-        This is the *current* behaviour and a known defect — celine-eu/rec-registry#37.
-        The test exists so that adding the bound is a visible three-part change
-        (code, requirement, test) rather than a silent one.
+        r = await live_client.post(
+            "/admin/lookup/assets-by-sensor-ids", json={"sensor_ids": []}
+        )
+
+        assert r.status_code == 200
+        assert r.json() == []
+
+    async def test_the_request_is_bounded(self, live_client):
+        """This route carried no bound at all while its sibling capped at 500,
+        and both are reachable by anything holding `rec-registry.lookup`.
+
+        Sensor ids are less guessable than usernames, so this was the weaker
+        enumeration path — but not the weaker bulk-extraction one, which is what
+        a bound is for.
 
         @verifies REQ-0043
         """
@@ -253,10 +267,25 @@ class TestAssetsBySensorIds:
 
         r = await live_client.post(
             "/admin/lookup/assets-by-sensor-ids",
-            json={"sensor_ids": [f"sen-{n}" for n in range(600)]},
+            json={"sensor_ids": [f"sen-{n}" for n in range(501)]},
+        )
+
+        assert r.status_code == 422
+
+    async def test_the_bound_itself_is_accepted(self, live_client):
+        """500 inclusive, pinned so a refactor cannot quietly make it 499.
+
+        @verifies REQ-0043
+        """
+        await _seed(live_client)
+
+        r = await live_client.post(
+            "/admin/lookup/assets-by-sensor-ids",
+            json={"sensor_ids": [f"sen-{n}" for n in range(500)]},
         )
 
         assert r.status_code == 200
+
 
 
 @pytest.mark.integration
@@ -375,3 +404,46 @@ class TestAssetsByUserIds:
         )
 
         assert r.status_code == 200
+
+
+# =============================================================================
+# The bound itself — no database, so it runs everywhere the suite does
+# =============================================================================
+
+
+class TestBothBatchesCarryTheSameBound:
+    """The asymmetry this closed was accidental: the bound arrived with the
+    newer endpoint and was not applied to the older one.
+
+    Two literals would let that happen again, so both models read one constant.
+    Deliberately outside the `integration` classes above — it needs no database,
+    and a check against drift that only runs where a database is reachable is a
+    check that is not running most of the time.
+    """
+
+    @staticmethod
+    def _bound(model, field: str) -> int:
+        (constraint,) = [
+            m for m in model.model_fields[field].metadata if hasattr(m, "max_length")
+        ]
+        return constraint.max_length
+
+    def test_the_two_batch_models_agree(self):
+        """@verifies REQ-0043"""
+        from celine.rec_registry.schemas.models import (
+            SensorIdsBatchRequest,
+            UserIdsBatchRequest,
+        )
+
+        assert self._bound(SensorIdsBatchRequest, "sensor_ids") == self._bound(
+            UserIdsBatchRequest, "user_ids"
+        )
+
+    def test_both_read_the_shared_constant(self):
+        """@verifies REQ-0043"""
+        from celine.rec_registry.schemas.models import (
+            MAX_BATCH_LOOKUP_IDS,
+            SensorIdsBatchRequest,
+        )
+
+        assert self._bound(SensorIdsBatchRequest, "sensor_ids") == MAX_BATCH_LOOKUP_IDS
