@@ -125,6 +125,19 @@ charger cannot be stored carrying a heat pump's fields, and an incomplete one an
 — the caller's next request depends on knowing them, and a bare rejection makes them read
 the source.
 
+**An asset key is unique per community, not per member.** The lookup behind the upsert
+filters by owner as well, so a key that looks free to this member may already be another
+member's — and the two outcomes behind that are different:
+
+- **The key is already this member's**, including when a concurrent writer created it a
+  moment ago. The upsert is applied to that row and answers `200`. A create-or-replace is
+  idempotent by definition, so a race means only that two writers arrived in an order
+  neither cared about; reporting a conflict the caller cannot act on would push retry logic
+  into six consuming repositories for nothing.
+- **The key is another member's.** `409`. Applying the upsert would move somebody else's
+  meter onto this member, which is not what *replace my asset* asked for — and this is not
+  only a race: two members using one key in sequence takes exactly the same path.
+
 `DELETE` on the same path answers `204`.
 
 ### REQ-0029 — patching a community keeps its areas, and upserting an area keeps the others

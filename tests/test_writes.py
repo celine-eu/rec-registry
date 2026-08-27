@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from celine.rec_registry.db.models import Asset
 from celine.rec_registry.schemas.bundle import DeliveryPointIn, MemberIn
 from celine.rec_registry.services import members as member_service
 
@@ -965,3 +966,200 @@ class TestTheSchemaVersionThroughTheApi:
 
         listed = await live_client.get("/admin/communities/dry-rec")
         assert listed.status_code == 404, "a dry run wrote something"
+
+
+# =============================================================================
+# Asset keys are unique per community, not per member
+# =============================================================================
+#
+# `uq_asset_community_key` is on `(community_id, key)` while `upsert_asset`
+# looks the asset up by owner as well, so the insert can be refused by a row the
+# function never looked at. Two different things arrive on that path and they
+# get different answers.
+
+
+def _meter(key: str, sensor_id: str, name: str = "Meter") -> dict:
+    return {
+        "key": key,
+        "asset_type": "meter",
+        "properties": {
+            "name": name,
+            "sensor_id": sensor_id,
+            "meter_type": "bidirectional",
+        },
+    }
+
+
+@pytest.mark.integration
+class TestAnAssetKeyTakenByAnotherMember:
+    """Not a race at all — this happens with one writer, in order.
+
+    It used to be a `500`, because the select filtered by owner and the index
+    did not.
+    """
+
+    async def _two_members(self, live_client) -> str:
+        key = await _seed_community(live_client)
+        for member_key, user_id in (("m1", "kc-0001"), ("m2", "kc-0002")):
+            r = await live_client.post(
+                f"/admin/communities/{key}/members",
+                json=_member_payload(key=member_key, user_id=user_id),
+            )
+            assert r.status_code == 201, r.text
+        return key
+
+    async def test_a_second_member_claiming_the_key_is_a_409(self, live_client):
+        """@verifies REQ-0028"""
+        key = await self._two_members(live_client)
+
+        first = await live_client.put(
+            f"/admin/communities/{key}/members/m1/assets/shared",
+            json=_meter("shared", "sensor-a"),
+        )
+        assert first.status_code == 200, first.text
+
+        second = await live_client.put(
+            f"/admin/communities/{key}/members/m2/assets/shared",
+            json=_meter("shared", "sensor-b"),
+        )
+
+        assert second.status_code == 409, second.text
+        assert "shared" in second.json()["detail"]
+
+    async def test_the_refusal_leaves_the_first_members_asset_alone(
+        self, live_client
+    ):
+        """The point of refusing: applying the upsert would have moved m1's
+        meter onto m2, which is not what "replace my asset" asked for.
+
+        @verifies REQ-0028
+        """
+        key = await self._two_members(live_client)
+        await live_client.put(
+            f"/admin/communities/{key}/members/m1/assets/shared",
+            json=_meter("shared", "sensor-a", name="Belongs to m1"),
+        )
+        await live_client.put(
+            f"/admin/communities/{key}/members/m2/assets/shared",
+            json=_meter("shared", "sensor-b", name="Stolen"),
+        )
+
+        r = await live_client.get(
+            f"/admin/communities/{key}/assets", params={"owner": "m1"}
+        )
+        assert r.status_code == 200, r.text
+        assets = {a["key"]: a for a in r.json()["items"]}
+
+        assert assets["shared"]["name"] == "Belongs to m1"
+        assert assets["shared"]["sensor_id"] == "sensor-a"
+
+    async def test_the_same_member_still_replaces_its_own(self, live_client):
+        """The refusal must not have made an ordinary replace into a conflict.
+
+        @verifies REQ-0028
+        """
+        key = await self._two_members(live_client)
+        await live_client.put(
+            f"/admin/communities/{key}/members/m1/assets/shared",
+            json=_meter("shared", "sensor-a", name="First"),
+        )
+
+        again = await live_client.put(
+            f"/admin/communities/{key}/members/m1/assets/shared",
+            json=_meter("shared", "sensor-c", name="Second"),
+        )
+
+        assert again.status_code == 200, again.text
+        assert again.json()["name"] == "Second"
+        assert again.json()["sensor_id"] == "sensor-c"
+
+
+@pytest.mark.integration
+class TestTwoWritersUpsertingOneAsset:
+    """The race, held open deliberately — same technique as
+    `TestTwoWritersAtOnce`, and for the same reason: a race that resolves the
+    other way takes the ordinary replace path and proves nothing."""
+
+    async def test_the_loser_applies_its_upsert_and_answers_200(self, live_client, pg_engine):
+        """A create-or-replace is idempotent, so a race means only that the two
+        writers arrived in an order neither cared about. The loser applies its
+        upsert to the row the winner created rather than reporting a conflict
+        the caller cannot act on.
+
+        @verifies REQ-0028
+        """
+        key = await _seed_community(live_client)
+        created = await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+        assert created.status_code == 201, created.text
+
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            member = await member_service.resolve_member(holder, community, "m1")
+            holder.add(
+                Asset(
+                    community_id=community.id,
+                    owner_id=member.id,
+                    key="raced",
+                    asset_type="meter",
+                    name="Winner",
+                    sensor_id="sensor-winner",
+                )
+            )
+            await holder.flush()
+
+            request = asyncio.create_task(
+                live_client.put(
+                    f"/admin/communities/{key}/members/m1/assets/raced",
+                    json=_meter("raced", "sensor-loser", name="Loser"),
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            r = await request
+
+        assert r.status_code == 200, r.text
+        assert r.json()["name"] == "Loser"
+        assert r.json()["sensor_id"] == "sensor-loser"
+
+    async def test_the_race_leaves_exactly_one_asset(self, live_client, pg_engine):
+        """@verifies REQ-0028"""
+        key = await _seed_community(live_client)
+        await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+
+        maker = async_sessionmaker(pg_engine, expire_on_commit=False)
+        async with maker() as holder:
+            holder_pid = await holder.scalar(text("select pg_backend_pid()"))
+            community = await member_service.resolve_community(holder, key)
+            member = await member_service.resolve_member(holder, community, "m1")
+            holder.add(
+                Asset(
+                    community_id=community.id,
+                    owner_id=member.id,
+                    key="raced",
+                    asset_type="meter",
+                    name="Winner",
+                    sensor_id="sensor-winner",
+                )
+            )
+            await holder.flush()
+
+            request = asyncio.create_task(
+                live_client.put(
+                    f"/admin/communities/{key}/members/m1/assets/raced",
+                    json=_meter("raced", "sensor-loser", name="Loser"),
+                )
+            )
+            await _wait_until_blocked(pg_engine, holder_pid)
+            await holder.commit()
+            assert (await request).status_code == 200
+
+        listing = await live_client.get(f"/admin/communities/{key}/assets")
+        assert listing.status_code == 200, listing.text
+        assert [a["key"] for a in listing.json()["items"]] == ["raced"]
+        assert listing.json()["items"][0]["name"] == "Loser"

@@ -374,7 +374,17 @@ async def upsert_asset(
     payload: AssetUpsert,
     session: AsyncSession = Depends(get_session),
 ):
-    """Create or replace one asset, leaving the member's other assets alone."""
+    """Create or replace one asset, leaving the member's other assets alone.
+
+    Answers `409` when the key already belongs to another member of the
+    community — asset keys are unique per community, not per member, so a key
+    that looks free to this member may not be.
+
+    A concurrent upsert of the same key by the same member is **not** a
+    conflict: the service applies it to the row the other writer created and
+    answers `200`, because a create-or-replace is idempotent and a race means
+    only that the two arrived in an order neither cared about.
+    """
     community, member = await _resolve(session, community_key, member_key)
 
     if payload.key != asset_key:
@@ -395,14 +405,18 @@ async def upsert_asset(
     except ValidationError as exc:
         raise HTTPException(422, f"Invalid {payload.asset_type} asset: {exc}") from exc
 
-    asset = await member_service.upsert_asset(
-        session,
-        community=community,
-        member=member,
-        asset_key=asset_key,
-        asset_type=payload.asset_type,
-        payload=validated,
-    )
+    try:
+        asset = await member_service.upsert_asset(
+            session,
+            community=community,
+            member=member,
+            asset_key=asset_key,
+            asset_type=payload.asset_type,
+            payload=validated,
+        )
+    except member_service.AssetKeyTaken as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     await session.commit()
     await session.refresh(asset)
 

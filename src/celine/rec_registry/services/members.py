@@ -51,6 +51,7 @@ from celine.rec_registry.services.importer import (
 )
 
 __all__ = [
+    "AssetKeyTaken",
     "MemberConflict",
     "MemberNotFound",
     "apply_member_patch",
@@ -92,11 +93,16 @@ class MemberNotFound(Exception):
     """No such member in this community."""
 
 
+class AssetKeyTaken(Exception):
+    """This asset key already belongs to another member of the community."""
+
+
 # The unique indexes behind the two application-level checks. Named rather than
 # matched loosely, so an unrelated constraint failure is not reported as
 # "already exists" — a misleading 409 is worse than a 500 that claims nothing.
 _MEMBER_KEY_CONSTRAINT = "uq_member_community_key"
 _MEMBER_USER_ID_CONSTRAINT = "uq_member_community_user_id"
+_ASSET_KEY_CONSTRAINT = "uq_asset_community_key"
 
 
 def member_conflict_from(
@@ -339,7 +345,27 @@ async def upsert_asset(
     asset_type: str,
     payload: Any,
 ) -> Asset:
-    """Create or replace one asset of a member, leaving its siblings alone."""
+    """Create or replace one asset of a member, leaving its siblings alone.
+
+    **Asset keys are unique per community, not per member** —
+    ``uq_asset_community_key`` is on ``(community_id, key)``, while the lookup
+    below filters by owner as well. So the insert can be refused by a row this
+    function never looked at, and the two cases behind that need different
+    answers:
+
+    * **the key is already this member's.** Another writer created it between
+      the select and the insert. Retry as the update it would have been had they
+      been a moment earlier, and answer as if nothing happened — a
+      create-or-replace is idempotent by definition, and a race means only that
+      two writers arrived in an order neither cared about.
+    * **the key is another member's.** ``AssetKeyTaken``. Applying the upsert
+      would move somebody else's meter onto this member, which is not what
+      "replace my asset" asked for, and it is a conflict whether the other row
+      arrived a moment ago or last year.
+
+    The second is not only a race: two members using one key sequentially takes
+    exactly the same path, and used to be a `500`.
+    """
     existing = await session.scalar(
         select(Asset).where(
             Asset.community_id == community.id,
@@ -361,14 +387,49 @@ async def upsert_asset(
         relationships=_extract_relationships(payload),
     )
 
-    if existing is None:
-        existing = Asset(
-            community_id=community.id, owner_id=member.id, key=asset_key, **fields
-        )
-        session.add(existing)
-    else:
+    if existing is not None:
         for name, value in fields.items():
             setattr(existing, name, value)
+        await session.flush()
+        return existing
 
-    await session.flush()
-    return existing
+    asset = Asset(
+        community_id=community.id, owner_id=member.id, key=asset_key, **fields
+    )
+
+    try:
+        # A SAVEPOINT, so that a refused insert costs this statement rather than
+        # the whole request: unlike `create_member`, the answer here may be to
+        # carry on rather than to give up, and a rolled-back transaction has
+        # nothing left to carry on with. `add` goes inside it so that rolling
+        # back to the savepoint also discards the pending row — otherwise the
+        # next flush re-attempts the insert that just failed.
+        async with session.begin_nested():
+            session.add(asset)
+            await session.flush()
+    except IntegrityError as exc:
+        if _ASSET_KEY_CONSTRAINT not in str(getattr(exc, "orig", exc)):
+            raise
+
+        winner = await session.scalar(
+            select(Asset).where(
+                Asset.community_id == community.id, Asset.key == asset_key
+            )
+        )
+        if winner is None:
+            # Refused by the index, and yet nothing is there to have refused it.
+            # Not the case this handles; let the original error stand rather
+            # than answer something invented.
+            raise
+        if winner.owner_id != member.id:
+            raise AssetKeyTaken(
+                f"Asset key {asset_key!r} already belongs to another member of "
+                f"this community"
+            ) from exc
+
+        for name, value in fields.items():
+            setattr(winner, name, value)
+        await session.flush()
+        return winner
+
+    return asset
