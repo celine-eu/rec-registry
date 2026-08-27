@@ -43,8 +43,11 @@ class Community(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
 
-    # Stable key identifier (e.g., "my_rec")
-    key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    # Stable key identifier (e.g., "my_rec"). Uniqueness is declared once, as the
+    # index in __table_args__ below — `unique=True` here would add a second
+    # constraint enforcing the same thing, and the migration only ever built the
+    # index, so the two schema builders disagreed.
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
 
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

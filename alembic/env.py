@@ -104,7 +104,23 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    """Run migrations in 'online' mode.
+
+    A caller may supply its own connection through ``config.attributes`` — the
+    suite does, so that migrations can be run against a throwaway schema and
+    compared to ``Base.metadata`` without a subprocess and without pointing
+    ``settings.database_url`` at a test database. Deployment supplies nothing and
+    takes the branch below.
+    """
+    supplied = config.attributes.get("connection")
+    if supplied is not None:
+        context.configure(
+            connection=supplied, target_metadata=target_metadata, compare_type=True
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     sync_url = _sync_db_url(settings.database_url)
 
     # Ensure database exists before running migrations

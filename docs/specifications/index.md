@@ -87,8 +87,12 @@ part that belongs to it.
   directly. JWT parsing and verification, the decision cache, and the `401`/`403` a real
   request would receive are not exercised — the suite runs with `AUTH_ENABLED=false` and
   `POLICIES_ENABLED=false`.
-- **The migrations.** The suite builds its schema from `Base.metadata`, so a model that has
-  drifted from `alembic/versions/` passes everything.
+- **The migrations, beyond the shape they build.** `tests/test_migrations.py` runs
+  `alembic upgrade head` into a throwaway schema and asserts it matches `Base.metadata`, so
+  a model that drifts from `alembic/versions/` no longer passes. What that does not cover:
+  `downgrade`, which drops the three tables and has never been run; and what a migration
+  does to a database that already holds rows — the check builds an empty schema, so
+  locking, backfill and anything a revision does to existing data are unexercised.
 - **The Keycloak realm.** Operator authorisation depends on organizations and groups that
   `../celine-policies` syncs, and nothing here would notice a rename.
 - **Read pagination.** `limit`, `cursor` and the filters on the community, member, asset
