@@ -18,8 +18,11 @@ route added without it would look exactly like the others.**
 together with their membership: the member summary, the community summary, how many
 delivery points they have, and their assets counted by type.
 
-The counts are of the caller's own assets. This is the route an application loads first,
-and it is shaped to make a second request unnecessary for the common case.
+The member summary carries `did` (REQ-0059), `null` for a member who holds none. This is
+the route an application loads first and it is shaped to make a second request unnecessary
+for the common case, so the caller's dataspace identity belongs in it.
+
+The counts are of the caller's own assets.
 
 ### REQ-0047 — a caller who is a member of nothing is answered, not refused
 
@@ -30,13 +33,22 @@ find out* whether somebody is a member yet, so it must be answerable before the 
 yes. The rest have nothing to return, and `403` says why rather than pretending an empty
 result.
 
-### REQ-0048 — the member detail is the caller's own, and omits what they already know
+### REQ-0048 — the member detail is the caller's own, omits what they already know, and carries what they do not
 
-`GET /user/member` answers key, name, role, area, status, delivery points, `extra` and
-timestamps — and **not `user_id`**.
+`GET /user/member` answers key, name, role, area, status, `did`, delivery points, `extra`
+and timestamps — and **not `user_id`**.
 
 Every field not returned is a field that cannot leak. The caller already knows their own
 identifier, so returning it buys nothing and puts an identity into one more response body.
+
+**`did` is returned, and the difference from `user_id` is the point.** A participant knows
+the username they authenticated with; they do not know the dataspace DID, because an
+onboarding service minted it on their behalf a step after registration — and it is the
+identifier their consent records are written in. Withholding it would mean a participant
+cannot see, in the one place that is theirs, which dataspace identity acts for them.
+
+It is `null` for a member who holds none, which is every member of a deployment with no
+dataspace and every member between registration and minting.
 
 ### REQ-0049 — the community detail carries the caller's place in it, and not its member list
 

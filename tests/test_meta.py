@@ -87,6 +87,29 @@ class TestVersion:
 
         assert (published / f"v{reported}").is_dir()
 
+    def test_the_openapi_document_reports_the_same_two_values(self):
+        """The fifth place the version was written down by hand.
+
+        `info.version` is what `../celine-sdk` names its snapshot of this API
+        after — `openapi/rec-registry/v<info.version>/` — and it generates the
+        client from that directory. A literal that never moves means every API
+        change overwrites the same snapshot in place, and no consumer of the
+        generated client can tell anything changed.
+
+        @verifies REQ-0058
+        """
+        from importlib.metadata import version as package_version
+
+        from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
+        from celine.rec_registry.main import create_app
+
+        # The real application, not `meta_client`'s bare one: `info` is set by
+        # `create_app`, and a bare `FastAPI()` reports FastAPI's own defaults.
+        info = create_app().openapi()["info"]
+
+        assert info["version"] == package_version("celine-rec-registry")
+        assert CURRENT_SCHEMA_VERSION in info["description"]
+
     def test_version_answers_without_a_database(self, meta_client):
         """Same reason as `/health`: it is reached for when things are wrong.
 

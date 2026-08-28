@@ -115,3 +115,33 @@ energy community is information about them regardless of what they own.
 
 The temptation to undo this is real and reasonable-sounding: *"tell the caller which ids
 were not found, so they can clean their list."* That helpfulness is the oracle.
+
+### REQ-0061 — a set of DIDs resolves to the members holding them, bounded and answering nothing about who exists
+
+`POST /admin/lookup/members-by-dids` answers one member record per DID found — key,
+`user_id`, `did`, name, role, area, status, **delivery points**, and the community.
+
+**It answers members, not assets**, and that is the part it would be easy to get wrong. The
+obvious move is to mirror REQ-0044 exactly and return assets, and it loses the supply point
+in the common case: `../onboarding` writes the declared POD into `Member.delivery_points`
+and registers **no assets**, because a meter's `sensor_id` is assigned at physical
+installation, long after onboarding. An asset-shaped answer is empty for every participant
+whose meter has not been commissioned. A commissioned meter stays reachable through the
+`user_id` in the same row and REQ-0044.
+
+**Every row carries its `did`**, which is what lets the caller attribute a row back to the
+DID it asked about — the same job `owner_user_id` does in REQ-0044.
+
+**Bounded:** at most 500 DIDs in one request; 501 is `422` and 500 is accepted. The same
+number as REQ-0043 and REQ-0045, from the same `MAX_BATCH_LOOKUP_IDS`. A DID is the
+identifier a consent record is written in, so the set a caller holds is a set of people who
+consented — and this route turns that into the supply points they hold. The bound is the
+same security decision it is on the other two.
+
+**Not an oracle:** a DID belonging to nobody and a member holding no supply points are
+deliberately indistinguishable — both contribute no rows, and neither is a `404`. An empty
+list of DIDs answers an empty list without querying.
+
+**It derives `assets.lookup`, not `lookup`** (REQ-0005). Resolving what a named person
+holds is a different disclosure from resolving which community a sensor sits in, and this
+route does the first.

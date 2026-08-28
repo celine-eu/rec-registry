@@ -96,7 +96,7 @@ src/celine/rec_registry/
     session.py               # Async session management
   schemas/
     models.py                # Pydantic response schemas
-    bundle.py                # Bundle import schemas (v0.5)
+    bundle.py                # Bundle import schemas (v0.6)
   api/
     user.py                  # Self-service user endpoints
     meta.py                  # Health, version

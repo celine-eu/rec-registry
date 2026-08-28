@@ -406,6 +406,161 @@ class TestAssetsByUserIds:
         assert r.status_code == 200
 
 
+@pytest.mark.integration
+class TestMembersByDids:
+    """The join the dataspace needs: the connector answers *who consents* in
+    DIDs, this registry knows *what they hold*, and nothing connected the two.
+
+    It answers **members, not assets**, and that is the whole design decision.
+    ../onboarding writes the declared supply point into `Member.delivery_points`
+    and registers no assets — a meter's `sensor_id` is assigned at physical
+    installation, long after onboarding — so an asset-shaped answer would be
+    empty for every participant whose meter is not commissioned yet.
+    """
+
+    ALICE = "did:web:dataspace.example%3A30005:alice"
+    BOB = "did:web:dataspace.example%3A30005:bob"
+
+    @staticmethod
+    async def _give_dids(client, key: str) -> None:
+        for member_key, did in (
+            ("lk-00001", TestMembersByDids.ALICE),
+            ("lk-00002", TestMembersByDids.BOB),
+        ):
+            r = await client.patch(
+                f"/admin/communities/{key}/members/{member_key}", json={"did": did}
+            )
+            assert r.status_code == 200, r.text
+
+    async def test_resolves_several_at_once(self, live_client):
+        """@verifies REQ-0061"""
+        key = await _seed(live_client)
+        await self._give_dids(live_client, key)
+
+        r = await live_client.post(
+            "/admin/lookup/members-by-dids", json={"dids": [self.ALICE, self.BOB]}
+        )
+
+        assert r.status_code == 200, r.text
+        assert sorted(m["key"] for m in r.json()) == ["lk-00001", "lk-00002"]
+
+    async def test_every_row_names_the_did_it_answers(self, live_client):
+        """Without it the caller cannot attribute a row back to the DID it asked
+        about, which is the entire purpose of a batch form — the same job
+        `owner_user_id` does for the asset batch.
+
+        @verifies REQ-0061
+        """
+        key = await _seed(live_client)
+        await self._give_dids(live_client, key)
+
+        r = await live_client.post(
+            "/admin/lookup/members-by-dids", json={"dids": [self.ALICE]}
+        )
+
+        assert [m["did"] for m in r.json()] == [self.ALICE]
+
+    async def test_it_answers_the_supply_point_without_any_asset(self, live_client):
+        """The reason this route is member-shaped rather than asset-shaped.
+
+        A participant registered but not yet metered has a declared POD in
+        `delivery_points` and no asset at all. Mirroring `assets-by-user-ids`
+        would answer nothing for exactly the population an export is most likely
+        to be authorised over.
+
+        @verifies REQ-0061
+        """
+        key = await _seed(live_client)
+        created = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json={
+                "user_id": "kc-carol",
+                "name": "Carol",
+                "role": "consumer",
+                "area": "north",
+                "status": "active",
+                "did": "did:web:dataspace.example%3A30005:carol",
+                "delivery_points": [{"id": "IT-DP-CAROL", "type": "pod"}],
+            },
+        )
+        assert created.status_code == 201, created.text
+
+        by_did = await live_client.post(
+            "/admin/lookup/members-by-dids",
+            json={"dids": ["did:web:dataspace.example%3A30005:carol"]},
+        )
+        by_assets = await live_client.post(
+            "/admin/lookup/assets-by-user-ids", json={"user_ids": ["kc-carol"]}
+        )
+
+        assert [dp["id"] for dp in by_did.json()[0]["delivery_points"]] == [
+            "IT-DP-CAROL"
+        ]
+        assert by_assets.json() == [], "the asset-shaped answer is the empty one"
+
+    async def test_an_empty_request_returns_an_empty_list(self, live_client):
+        """@verifies REQ-0061"""
+        await _seed(live_client)
+
+        r = await live_client.post("/admin/lookup/members-by-dids", json={"dids": []})
+
+        assert r.status_code == 200
+        assert r.json() == []
+
+    async def test_a_stranger_is_indistinguishable_from_a_member_holding_no_did(
+        self, live_client
+    ):
+        """The no-enumeration-oracle property, inherited from REQ-0045.
+
+        The caller supplies the DIDs, so any difference between "no such DID"
+        and "that DID is held by nobody here" would turn this into a way to
+        discover who is registered in the dataspace.
+
+        @verifies REQ-0061
+        """
+        key = await _seed(live_client)
+        await self._give_dids(live_client, key)
+
+        stranger = await live_client.post(
+            "/admin/lookup/members-by-dids",
+            json={"dids": ["did:web:dataspace.example%3A30005:nobody"]},
+        )
+
+        assert stranger.status_code == 200
+        assert stranger.json() == []
+
+    async def test_the_request_is_bounded(self, live_client):
+        """A DID is the identifier a consent record is written in, so the set a
+        caller holds is a set of people who consented — and this route turns
+        that into the supply points they hold. The bound is the same security
+        decision it is on the other two batches.
+
+        @verifies REQ-0061
+        """
+        await _seed(live_client)
+
+        r = await live_client.post(
+            "/admin/lookup/members-by-dids",
+            json={"dids": [f"did:web:example:{n}" for n in range(501)]},
+        )
+
+        assert r.status_code == 422
+
+    async def test_the_bound_itself_is_accepted(self, live_client):
+        """500 inclusive, pinned so a refactor cannot quietly make it 499.
+
+        @verifies REQ-0061
+        """
+        await _seed(live_client)
+
+        r = await live_client.post(
+            "/admin/lookup/members-by-dids",
+            json={"dids": [f"did:web:example:{n}" for n in range(500)]},
+        )
+
+        assert r.status_code == 200
+
+
 # =============================================================================
 # The bound itself — no database, so it runs everywhere the suite does
 # =============================================================================
@@ -415,10 +570,10 @@ class TestBothBatchesCarryTheSameBound:
     """The asymmetry this closed was accidental: the bound arrived with the
     newer endpoint and was not applied to the older one.
 
-    Two literals would let that happen again, so both models read one constant.
-    Deliberately outside the `integration` classes above — it needs no database,
-    and a check against drift that only runs where a database is reachable is a
-    check that is not running most of the time.
+    Two literals would let that happen again, so every batch model reads one
+    constant — three of them now. Deliberately outside the `integration` classes
+    above — it needs no database, and a check against drift that only runs where
+    a database is reachable is a check that is not running most of the time.
     """
 
     @staticmethod
@@ -438,6 +593,20 @@ class TestBothBatchesCarryTheSameBound:
         assert self._bound(SensorIdsBatchRequest, "sensor_ids") == self._bound(
             UserIdsBatchRequest, "user_ids"
         )
+
+    def test_the_did_batch_carries_it_too(self):
+        """Added third, which is exactly how the sensor batch came to have no
+        bound at all. Asserted here rather than left to the route test, so the
+        omission would surface without a database.
+
+        @verifies REQ-0061
+        """
+        from celine.rec_registry.schemas.models import (
+            MAX_BATCH_LOOKUP_IDS,
+            DidsBatchRequest,
+        )
+
+        assert self._bound(DidsBatchRequest, "dids") == MAX_BATCH_LOOKUP_IDS
 
     def test_both_read_the_shared_constant(self):
         """@verifies REQ-0043"""

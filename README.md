@@ -4,7 +4,7 @@ API for modelling Renewable Energy Communities (RECs). Manages communities, memb
 
 ## Features
 
-- Multi-community support with v0.5 schema
+- Multi-community support with v0.6 schema
 - Self-service user API (profile, membership, assets, delivery points)
 - Admin API for community management, cross-community lookup, and batch operations
 - **Runtime member management** — create, update, deactivate members and their delivery points and assets, one at a time

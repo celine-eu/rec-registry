@@ -17,7 +17,7 @@ class TestBundleParsing:
 
     def test_schema_version(self, example_bundle):
         """@verifies REQ-0018"""
-        assert example_bundle.schema_version == "0.5"
+        assert example_bundle.schema_version == "0.6"
 
     def test_community_id(self, example_bundle):
         """@verifies REQ-0011"""

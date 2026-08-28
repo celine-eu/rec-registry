@@ -169,7 +169,32 @@ Lookup asset details by sensor ID across communities.
 
 Batch lookup: resolve multiple sensor IDs to assets in a single request.
 
-**Request body:** list of sensor ID strings.
+**Request body:** `{sensor_ids: [...]}`, at most 500.
+
+### `POST /admin/lookup/assets-by-user-ids`
+
+Batch lookup: resolve the assets owned by a set of members, across communities.
+Every row carries `owner_user_id`, so the caller can attribute it back to the
+member it asked about.
+
+**Request body:** `{user_ids: [...]}`, at most 500.
+
+### `POST /admin/lookup/members-by-dids`
+
+Batch lookup: resolve the members holding a set of dataspace DIDs, across
+communities. Every row carries its `did`, plus the member's `user_id`, delivery
+points and community.
+
+**Members, not assets** — deliberately. A participant is registered with a
+declared supply point and no asset at all, because a meter's `sensor_id` is
+assigned at physical installation. An asset-shaped answer would be empty for
+everyone whose meter is not commissioned yet; a commissioned meter stays
+reachable through `assets-by-user-ids` and the `user_id` in the same row.
+
+**Request body:** `{dids: [...]}`, at most 500.
+
+All three batch routes share one bound, and none of them is an enumeration
+oracle: an identifier matching nothing contributes no row and is never a `404`.
 
 ---
 
@@ -220,8 +245,13 @@ Create one member, with its delivery points and assets.
 numbering (`gl-00001` → `gl-00002`), so a caller with no opinion still gets a key
 that reads correctly in an exported bundle.
 
+`did` is optional and unique across the whole registry, unlike `key` and
+`user_id`, which are unique per community. It is usually written afterwards
+rather than here — see `PATCH` below.
+
 **Responses:** `201` with the member; `409` when the key or `user_id` is already
-taken, naming the existing key so the caller can switch to `PATCH`; `404` for an
+taken, naming the existing key so the caller can switch to `PATCH`, or when the
+`did` is already held by another member anywhere in the registry; `404` for an
 unknown community.
 
 ### `PATCH /admin/communities/{community_key}/members/{member_key}`
@@ -232,7 +262,15 @@ Partial update. Absent fields are left alone, never cleared.
 patch that happened to omit it would read as "this member now has none". Use the
 delivery-point routes.
 
-**Responses:** `200`; `409` if the new `user_id` belongs to another member.
+**This is how a member's dataspace `did` is written**, because the identity is
+minted a step after the member is registered. Re-sending a member the DID it
+already holds is a `200` that changes nothing, so the write is safe to retry.
+
+**Responses:** `200`; `409` if the new `user_id` belongs to another member of the
+community, or if the new `did` belongs to any other member in the registry. A DID
+clash inside the addressed community names the holding member; one in another
+community does not, because which member of which other community holds a DID is
+not the caller's question.
 
 ### `POST /admin/communities/{community_key}/members/{member_key}/status`
 

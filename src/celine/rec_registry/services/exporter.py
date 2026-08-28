@@ -93,7 +93,15 @@ async def export_community_bundle(
     for member in sorted(community.members, key=lambda m: m.key):
         member_assets = _build_asset_collection(member.assets)
 
-        member_dict: dict[str, Any] = {"user_id": member.user_id, "name": member.name}
+        member_dict: dict[str, Any] = {"user_id": member.user_id}
+
+        # Only when it has one. A community with no dataspace would otherwise
+        # export a `did: null` on every member, which reads as a field somebody
+        # forgot to fill in rather than one that does not apply here.
+        if member.did:
+            member_dict["did"] = member.did
+
+        member_dict["name"] = member.name
 
         # type stored in extra (no dedicated DB column)
         member_type = (member.extra or {}).get("type")

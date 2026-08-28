@@ -1,10 +1,11 @@
 """
 Pydantic schemas for the registry bundle format.
 
-The models here follow `schemas/community/v0.5/community.schema.json` — the
-`OperatorIn` model and `TopologyNodeIn.operator_id` below are v0.5 additions, so
-the docstring that said v0.4 was describing a shape this file stopped having.
-`core/versions.py` says which version that is; nothing here restates it.
+The models here follow `schemas/community/v0.6/community.schema.json` — the
+`OperatorIn` model and `TopologyNodeIn.operator_id` are v0.5 additions and
+`MemberIn.did` is the v0.6 one, so the docstring that said v0.4 was describing a
+shape this file stopped having. `core/versions.py` says which version that is;
+nothing here restates it.
 
 Supports:
 - Community with legal, links, contact, settings, areas, topology, operators
@@ -288,6 +289,10 @@ class MemberIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     user_id: str
+    # The member's dataspace DID. Optional because it is minted a step after the
+    # member is registered, and never at all in a deployment with no dataspace —
+    # so a bundle written before this field existed still parses.
+    did: str | None = None
     name: str
     type: str | None = None  # schema.org type CURIE: schema:Person, schema:GovernmentOrganization, schema:LocalBusiness, schema:Organization, …
     role: str  # consumer, prosumer, producer, operator, admin
@@ -339,7 +344,7 @@ class RegistryBundleIn(BaseModel):
     """
     Complete registry bundle for import.
 
-    Matches `schemas/community/v0.5/community.schema.json`.
+    Matches `schemas/community/v0.6/community.schema.json`.
     """
     model_config = ConfigDict(extra="allow")
 

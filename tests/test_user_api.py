@@ -155,6 +155,63 @@ class TestMemberAndCommunity:
         # every field not returned is a field that cannot leak.
         assert "user_id" not in body
 
+    async def test_a_participant_sees_their_own_dataspace_did(
+        self, live_client, as_user
+    ):
+        """The contrast with `user_id` in the test above is the whole point.
+
+        `user_id` is omitted because the caller already knows it. The DID they
+        do not know — an onboarding service minted it on their behalf — and it
+        is the identifier their consent records are written in, so this is the
+        one place a participant can see which dataspace identity acts for them.
+
+        @verifies REQ-0048
+        """
+        key = await _seed(live_client)
+        did = "did:web:dataspace.example%3A30005:alice"
+        patched = await live_client.patch(
+            f"/admin/communities/{key}/members/us-00001", json={"did": did}
+        )
+        assert patched.status_code == 200, patched.text
+
+        alice = await as_user(identifies_as(ALICE)).get("/user/member")
+        bob = await as_user(identifies_as(BOB)).get("/user/member")
+
+        assert alice.json()["did"] == did
+        assert bob.json()["did"] is None, "Bob holds none, and sees none of Alice's"
+
+    async def test_the_profile_summary_carries_it_too(self, live_client, as_user):
+        """`GET /user` is the route an application loads first, and it is shaped
+        to make a second request unnecessary.
+
+        @verifies REQ-0046
+        """
+        key = await _seed(live_client)
+        did = "did:web:dataspace.example%3A30005:alice"
+        await live_client.patch(
+            f"/admin/communities/{key}/members/us-00001", json={"did": did}
+        )
+
+        r = await as_user(identifies_as(ALICE)).get("/user")
+
+        assert r.json()["membership"]["member"]["did"] == did
+
+    async def test_a_member_without_one_reads_as_null_rather_than_absent(
+        self, live_client, as_user
+    ):
+        """Every member of a deployment with no dataspace, and every member
+        between registration and minting.
+
+        @verifies REQ-0048
+        """
+        await _seed(live_client)
+
+        r = await as_user(identifies_as(ALICE)).get("/user/member")
+
+        assert r.status_code == 200
+        assert "did" in r.json()
+        assert r.json()["did"] is None
+
     async def test_community_detail_carries_the_callers_place_in_it(
         self, live_client, as_user
     ):

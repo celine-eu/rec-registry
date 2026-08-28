@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from celine.rec_registry.schemas.bundle import RegistryBundleIn
+from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
 from celine.rec_registry.services.importer import (
     ImportWouldOverwrite,
     replacement_import_bundle,
@@ -20,7 +21,7 @@ def minimal_bundle() -> RegistryBundleIn:
     return RegistryBundleIn(
         **{
             "version": "1.0",
-            "schema_version": "0.5",
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "community": {
                 "id": "test-rec",
                 "name": "Test REC",
@@ -193,7 +194,7 @@ class TestWarnings:
         bundle = RegistryBundleIn(
             **{
                 "version": "1.0",
-                "schema_version": "0.5",
+                "schema_version": CURRENT_SCHEMA_VERSION,
                 "community": {
                     "id": "warn-rec",
                     "name": "Warn REC",

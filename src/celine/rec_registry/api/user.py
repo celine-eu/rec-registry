@@ -88,6 +88,7 @@ async def get_me(
             role=member.role,
             area=member.area,
             status=member.status,
+            did=member.did,
         ),
         community=UserCommunitySummary(
             key=community.key,
@@ -115,6 +116,14 @@ async def get_my_member(
     Get current user's full member details.
 
     Note: Does not include user_id in response (user already knows it).
+
+    It **does** include `did`, and the two omissions are not the same kind. The
+    caller knows the username they authenticated with, so returning it would put
+    an identity into one more response body for nothing. They do not know the
+    dataspace DID — an onboarding service minted it on their behalf, one step
+    after registration — and it is the identifier their consent records are
+    written in. Withholding it means a participant cannot see, in the one place
+    that is theirs, which dataspace identity is acting for them.
     """
     member = await session.scalar(
         select(Member).where(Member.user_id == user.get_username())
@@ -131,6 +140,7 @@ async def get_my_member(
         role=member.role,
         area=member.area,
         status=member.status,
+        did=member.did,
         delivery_points=[DeliveryPoint(**dp) for dp in (member.delivery_points or [])],
         extra=member.extra or {},
         created_at=member.created_at.isoformat() if member.created_at else None,

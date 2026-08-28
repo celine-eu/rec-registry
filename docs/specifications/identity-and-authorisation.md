@@ -46,12 +46,23 @@ every caller during development.
 Areas are community structure rather than membership, so they are authorised with the
 community and not with the members who reference them.
 
-### REQ-0005 — import, export and lookup keep their own actions
+### REQ-0005 — import, export and lookup keep their own actions, and one lookup is named apart
 
 `/admin/import` and `/admin/import/yaml` derive `import`; `/admin/export` derives
-`export`; anything under `/admin/lookup/` derives `lookup`, including its batch routes.
+`export`; anything under `/admin/lookup/` derives `lookup`.
 
-These three are separable because they are the ones a service account most often should
+**With two exceptions, and they are the same exception twice.**
+`/admin/lookup/assets-by-user-ids` and `/admin/lookup/members-by-dids` derive
+**`assets.lookup`**. Both start from an identifier that names a *person* and answer what
+that person holds; the rest answer which community a user, a sensor or a supply point sits
+in. That is a different disclosure, so it gets a different name.
+
+Both are granted by `rec-registry.lookup` today and nothing changes for a caller — naming
+them apart is what lets a policy separate them later without an API change. Anything else
+under `/admin/lookup/` falls through to `lookup`, so a new person-shaped batch route has to
+be added here deliberately rather than inheriting the broader action by default.
+
+These are separable because they are the ones a service account most often should
 *not* have. A service that registers approved participants needs `members.write` and
 `assets.write`, and has no business importing, exporting or purging.
 
@@ -84,8 +95,8 @@ that have no such operation.
 
 The shared scope matcher in `../celine-sdk` treats a held scope ending `.admin` as
 covering every action of that service, so `rec-registry.admin` satisfies `read`,
-`members.write`, `members.purge`, `assets.write`, `community.write`, `import`, `export`
-and `lookup`.
+`members.write`, `members.purge`, `assets.write`, `community.write`, `import`, `export`,
+`lookup` and `assets.lookup`.
 
 This is what made the fine-grained actions backwards compatible: every token that worked
 before they existed still works. The property is pinned by reading
@@ -97,13 +108,15 @@ service account; grant the actions it calls.
 
 ### REQ-0010 — every action name has a rule in the Rego bundle
 
-`policies/celine/rec_registry/access.rego` carries a rule for each of the eight action
-names. An action derived by the middleware with no corresponding rule would be denied by
-default — a fail-closed outcome, but one that presents as an unexplained `403` in
-production rather than as anything a test would catch.
+`policies/celine/rec_registry/access.rego` carries a rule for each of the nine action
+names `_get_admin_action` can return. An action derived by the middleware with no
+corresponding rule would be denied by default — a fail-closed outcome, but one that
+presents as an unexplained `403` in production rather than as anything a test would catch.
 
-So the bundle is read and checked for all eight, rather than the actions being exercised
-one at a time.
+So the bundle is read and checked for all nine, rather than the actions being exercised
+one at a time. `assets.lookup` is the one that shows why this is checked as a set: it was
+added to the middleware and to the bundle together but left out of the list being checked,
+so for a while the check passed while covering eight of nine.
 
 ---
 

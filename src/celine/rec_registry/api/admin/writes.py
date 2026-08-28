@@ -71,6 +71,7 @@ def _member_detail(member: Member) -> MemberDetail:
         id=str(member.id),
         key=member.key,
         user_id=member.user_id,
+        did=member.did,
         name=member.name,
         role=member.role,
         area=member.area,
@@ -158,6 +159,24 @@ async def patch_member(
 
     Reassigning a `user_id` that belongs to somebody else is `409`, whether the
     clash was already committed or arrives concurrently.
+
+    **This is also how a member's dataspace DID is written**, because the DID is
+    minted a step after the member is registered — there is no separate route
+    for it, since a dedicated write would have to be added to
+    `TestNoWriteReducesASibling` to earn nothing `PATCH` does not already do.
+    Its clash check differs from the `user_id` one beside it in two ways, and
+    both matter:
+
+    * **It is registry-wide.** `ix_member_did` is global, so the check cannot be
+      scoped to the community in the path.
+    * **It names the holder only inside the addressed community.** Saying which
+      member of *another* community holds a DID would answer a question the
+      caller did not ask about people they were not addressing — the same
+      enumeration reasoning as REQ-0045.
+
+    Re-sending a member the DID it already holds is a no-op success: onboarding
+    writes it from a retriable step, so the same write arriving twice must not
+    be a conflict.
     """
     community, member = await _resolve(session, community_key, member_key)
 
@@ -182,6 +201,26 @@ async def patch_member(
                 f"{clash.key!r}",
             )
 
+    if "did" in patch and patch["did"]:
+        # `Member.id`, not `Member.key`: keys repeat across communities and this
+        # query does not filter by one, so excluding by key would also exclude a
+        # same-keyed member of a different community — the very holder that has
+        # to be found.
+        clash = await session.scalar(
+            select(Member).where(
+                Member.did == patch["did"],
+                Member.id != member.id,
+            )
+        )
+        if clash is not None:
+            if clash.community_id == community.id:
+                detail = (
+                    f"did {patch['did']!r} already belongs to member {clash.key!r}"
+                )
+            else:
+                detail = f"did {patch['did']!r} already belongs to another member"
+            raise HTTPException(409, detail)
+
     await member_service.apply_member_patch(member, patch)
     try:
         await session.commit()
@@ -190,7 +229,10 @@ async def patch_member(
         # yet, so the unique index is what refuses this one. Same answer either way.
         await session.rollback()
         conflict = member_service.member_conflict_from(
-            exc, key=member_key, user_id=patch.get("user_id")
+            exc,
+            key=member_key,
+            user_id=patch.get("user_id"),
+            did=patch.get("did"),
         )
         if conflict is None:
             raise

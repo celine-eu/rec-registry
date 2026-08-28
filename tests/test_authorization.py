@@ -75,6 +75,37 @@ class TestActionDerivation:
         """@verifies REQ-0005"""
         assert action(None, "/admin/lookup/user/u1", "GET") == "lookup"
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/admin/lookup/assets-by-user-ids",
+            "/admin/lookup/members-by-dids",
+        ],
+    )
+    def test_a_lookup_that_names_a_person_is_named_apart(self, path):
+        """Both of these start from an identifier naming a *person* and answer
+        what that person holds. The rest of `/admin/lookup/` answers which
+        community a user, sensor or supply point sits in, which is a different
+        disclosure.
+
+        Same scope grants both today; the separate name is what lets a policy
+        split them later without an API change.
+
+        @verifies REQ-0005
+        """
+        assert action(None, path, "POST") == "assets.lookup"
+
+    def test_any_other_lookup_falls_through_to_the_broad_action(self):
+        """The special case is a list, not a pattern, so a new person-shaped
+        batch route inherits `lookup` until somebody decides otherwise. That is
+        the safe default — the broader action is the one every lookup caller
+        already holds — and it is the reason adding a route means touching this
+        function.
+
+        @verifies REQ-0005
+        """
+        assert action(None, "/admin/lookup/members-by-something-else", "POST") == "lookup"
+
 
 class TestPurgeIsSeparate:
     """Erasure is authorized apart from ordinary member writes.
@@ -137,7 +168,14 @@ class TestScopeMatching:
         assert 'endswith(have, ".admin")' in rego
 
     def test_every_action_has_a_rule(self):
-        """@verifies REQ-0010"""
+        """Every action `_get_admin_action` can return, checked as a set.
+
+        An action with no rule is denied by default — fail-closed, but it
+        presents as an unexplained `403` in production rather than as anything a
+        test catches.
+
+        @verifies REQ-0010
+        """
         from pathlib import Path
 
         rego = Path("policies/celine/rec_registry/access.rego").read_text()
@@ -150,5 +188,9 @@ class TestScopeMatching:
             "import",
             "export",
             "lookup",
+            # Ninth, and the one that shows why the list is checked as a set:
+            # it was added to the middleware and to the bundle together and left
+            # out of this list, so the check passed while covering eight of nine.
+            "assets.lookup",
         ):
             assert f'input.action.name == "{name}"' in rego, f"no rule for {name}"

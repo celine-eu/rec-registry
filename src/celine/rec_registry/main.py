@@ -5,6 +5,7 @@ CELINE REC Registry API - Main application.
 from fastapi import FastAPI
 
 from celine.rec_registry.core.middleware import PolicyMiddleware
+from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION, api_version
 from celine.rec_registry.api.meta import router as meta_router
 from celine.rec_registry.api.user import router as user_router
 
@@ -15,10 +16,19 @@ from celine.rec_registry.api.admin.management import router as management_router
 
 
 def create_app():
+    # The two values here are derived for the same reason `/version` derives its
+    # own (REQ-0058): they were literals, and literals nobody reads drift. This
+    # pair drifts *further* than most, because `info.version` is what
+    # `../celine-sdk` names its snapshot of this API after — a version that does
+    # not move while the document does means a generated client is overwritten
+    # in place, and no consumer can tell the API changed.
     app = FastAPI(
         title="CELINE REC Registry API",
-        description="Registry API for Renewable Energy Communities (v0.4 schema)",
-        version="1.0.0",
+        description=(
+            "Registry API for Renewable Energy Communities "
+            f"(bundle schema v{CURRENT_SCHEMA_VERSION})"
+        ),
+        version=api_version(),
     )
 
     # Add policy middleware for authentication and authorization

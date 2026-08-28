@@ -121,7 +121,8 @@ class Member(Base):
     Community member (participant).
     
     - key: internal member key (e.g., "gl-00001")
-    - user_id: external identity system identifier (e.g., Keycloak UUID)
+    - user_id: Keycloak username the participant authenticates with — not a subject UUID
+    - did: dataspace decentralised identifier, globally unique, absent until minted
     - role: consumer, prosumer, producer, operator, admin
     - status: pending, active, suspended, inactive
     - area: reference to community area key
@@ -145,11 +146,46 @@ class Member(Base):
         nullable=False,
     )
 
-    # Internal key (e.g., "gl-00001")
+    # A member carries three identifiers, and each answers a different question.
+    # They are documented together because the temptation is to reach for
+    # whichever one is nearest, and two of the three are wrong for any given use.
+    #
+    #   key      what this community calls them ("gl-00001"). Unique per
+    #            community. It appears in exported bundles and in
+    #            ../celine-policies and ../onboarding, so it is never reissued.
+    #   user_id  who they authenticate as. A Keycloak **username** — the value
+    #            `preferred_username` carries — and *not* a subject UUID, which
+    #            is the mistake the name invites. Every self-service route
+    #            resolves its member with `JwtUser.get_username()`, so a row
+    #            written with a `sub` in this field exports cleanly and locks
+    #            its owner out. Unique per community.
+    #   did      who they are in the dataspace. Globally unique, and absent
+    #            until the identity is minted — see the column below.
+
     key: Mapped[str] = mapped_column(String(128), nullable=False)
 
-    # External user identifier (e.g., Keycloak UUID)
     user_id: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    # The member's decentralised identifier in the dataspace.
+    #
+    # A column rather than a key in `extra`: it is a join key, resolved by an
+    # `IN` over a set of DIDs on every consent-gated export, and burying an
+    # identifier in JSONB makes it look like a declaration.
+    #
+    # **Nullable, and globally unique.** The DID arrives after the member does —
+    # ../onboarding registers at `rec_registry_member` and mints the identity at
+    # `dataspace_identity`, one step later — and a deployment with no dataspace
+    # never populates it at all. A unique index permits many NULLs, which is
+    # exactly the wanted semantics: at most one member per DID, any number of
+    # members without one.
+    #
+    # Global rather than per-community, unlike `key` and `user_id`. A person
+    # cannot be a member of two RECs — the same supply point settled twice is
+    # double billing — so there is no second community for the same DID to
+    # appear in. That is a domain assumption, not a derived fact; if multi-REC
+    # membership ever arrives, this constraint is what has to be revisited
+    # first.
+    did: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     name: Mapped[str] = mapped_column(String(256), nullable=False)
 
@@ -191,6 +227,11 @@ class Member(Base):
     __table_args__ = (
         UniqueConstraint("community_id", "key", name="uq_member_community_key"),
         UniqueConstraint("community_id", "user_id", name="uq_member_community_user_id"),
+        # Global, not per-community: see the column comment. Nullable, so this
+        # permits any number of members holding no DID while refusing a second
+        # holder of one — which is what makes a DID a safe join key for an
+        # export authorised by consent.
+        Index("ix_member_did", "did", unique=True),
         Index("ix_member_community_id", "community_id"),
         Index("ix_member_user_id", "user_id"),
         Index("ix_member_role", "role"),

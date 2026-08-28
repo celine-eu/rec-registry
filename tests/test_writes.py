@@ -530,6 +530,259 @@ class TestCommunityWrites:
 
 
 @pytest.mark.integration
+class TestTheDataspaceDid:
+    """The join key between *who consents* and *what they hold*.
+
+    The connector states consent in DIDs; this registry knows supply points;
+    nothing joined the two before this column. Resolving a DID through the
+    identity registry does not close the gap, because `Member.user_id` holds a
+    Keycloak username and the identifier that hop returns matches no row here.
+
+    Two things are easy to get wrong and are what these tests are for: the DID
+    landing in `extra` instead of its column, and a clash message naming a
+    member of a community the caller was not addressing.
+    """
+
+    DID = "did:web:dataspace.example%3A30005:alice"
+    OTHER = "did:web:dataspace.example%3A30005:bob"
+
+    async def test_a_member_can_be_created_holding_a_did(self, live_client):
+        """@verifies REQ-0059"""
+        key = await _seed_community(live_client, key="did-rec")
+
+        r = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+
+        assert r.status_code == 201, r.text
+        assert r.json()["did"] == self.DID
+
+    async def test_the_did_lands_in_its_column_and_not_in_extra(self, live_client):
+        """The trap `_MEMBER_COLUMNS` exists to avoid.
+
+        `MemberIn` is `extra="allow"`, so a `did` the row builder does not know
+        about validates, imports, and lands in `extra` while the column stays
+        `NULL` — one member holding two records of its DID, disagreeing.
+
+        @verifies REQ-0059
+        """
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+
+        member = (
+            await live_client.get(f"/admin/communities/{key}/members/m1")
+        ).json()
+
+        assert member["did"] == self.DID
+        assert "did" not in member["extra"]
+
+    async def test_a_member_without_one_is_ordinary(self, live_client):
+        """Nullable because the DID is minted a step after registration, and a
+        deployment with no dataspace never mints one at all.
+
+        @verifies REQ-0059
+        """
+        key = await _seed_community(live_client, key="did-rec")
+
+        r = await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+
+        assert r.status_code == 201, r.text
+        assert r.json()["did"] is None
+
+    async def test_many_members_may_hold_no_did_at_once(self, live_client):
+        """The unique index must not read the absence of a DID as a value.
+
+        Postgres treats NULLs as distinct, which is exactly the wanted
+        semantics — at most one member per DID, any number without one. A
+        constraint built the other way would let precisely one member in the
+        registry lack a dataspace identity.
+
+        @verifies REQ-0059
+        """
+        key = await _seed_community(live_client, key="did-rec")
+
+        first = await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+        second = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m2", user_id="kc-0002"),
+        )
+
+        assert first.status_code == 201, first.text
+        assert second.status_code == 201, second.text
+
+    async def test_creating_a_second_holder_of_one_did_is_refused(self, live_client):
+        """@verifies REQ-0059"""
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+
+        clash = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m2", user_id="kc-0002", did=self.DID),
+        )
+
+        assert clash.status_code == 409, clash.text
+
+    async def test_the_did_is_unique_across_communities(self, live_client):
+        """Unlike `key` and `user_id`, which are unique per community.
+
+        The same person settled in two RECs is the same supply point billed
+        twice, so the index is global — and this is the test that would fail
+        first if that domain assumption were ever revisited.
+
+        @verifies REQ-0059
+        """
+        one = await _seed_community(live_client, key="did-rec-one")
+        two = await _seed_community(live_client, key="did-rec-two")
+
+        first = await live_client.post(
+            f"/admin/communities/{one}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+        assert first.status_code == 201, first.text
+
+        clash = await live_client.post(
+            f"/admin/communities/{two}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+
+        assert clash.status_code == 409, clash.text
+
+    async def test_patch_writes_the_did_onto_an_existing_member(self, live_client):
+        """The route ../onboarding uses: the DID is minted one step after the
+        member is registered, so it arrives as an update rather than a field on
+        the create.
+
+        @verifies REQ-0060
+        """
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+
+        r = await live_client.patch(
+            f"/admin/communities/{key}/members/m1", json={"did": self.DID}
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["did"] == self.DID
+
+    async def test_repatching_the_same_did_is_a_no_op_success(self, live_client):
+        """Onboarding writes this from a retriable step, so the same write
+        arriving twice must not be a conflict.
+
+        @verifies REQ-0060
+        """
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="m1")
+        )
+        await live_client.patch(
+            f"/admin/communities/{key}/members/m1", json={"did": self.DID}
+        )
+
+        again = await live_client.patch(
+            f"/admin/communities/{key}/members/m1", json={"did": self.DID}
+        )
+
+        assert again.status_code == 200, again.text
+        assert again.json()["did"] == self.DID
+
+    async def test_a_clash_inside_the_community_names_the_holder(self, live_client):
+        """@verifies REQ-0060"""
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m2", user_id="kc-0002"),
+        )
+
+        r = await live_client.patch(
+            f"/admin/communities/{key}/members/m2", json={"did": self.DID}
+        )
+
+        assert r.status_code == 409, r.text
+        assert "m1" in r.json()["detail"]
+
+    async def test_a_clash_in_another_community_names_nobody(self, live_client):
+        """Which member of which other community holds a DID is a question
+        about people the caller was not addressing — the same enumeration
+        reasoning as REQ-0045.
+
+        @verifies REQ-0060
+        """
+        one = await _seed_community(live_client, key="did-rec-one")
+        two = await _seed_community(live_client, key="did-rec-two")
+        await live_client.post(
+            f"/admin/communities/{one}/members",
+            json=_member_payload(key="held-by-me", did=self.DID),
+        )
+        await live_client.post(
+            f"/admin/communities/{two}/members", json=_member_payload(key="m2")
+        )
+
+        r = await live_client.patch(
+            f"/admin/communities/{two}/members/m2", json={"did": self.DID}
+        )
+
+        assert r.status_code == 409, r.text
+        assert "held-by-me" not in r.json()["detail"]
+
+    async def test_a_same_keyed_member_elsewhere_is_still_found(self, live_client):
+        """The clash check excludes the member being patched by row id, not by
+        member key. Excluding by key would also exclude a same-keyed member of
+        another community — which is precisely the holder that has to be found,
+        since keys repeat across communities and this query does not filter by
+        one.
+
+        @verifies REQ-0060
+        """
+        one = await _seed_community(live_client, key="did-rec-one")
+        two = await _seed_community(live_client, key="did-rec-two")
+        await live_client.post(
+            f"/admin/communities/{one}/members",
+            json=_member_payload(key="gl-00001", did=self.DID),
+        )
+        await live_client.post(
+            f"/admin/communities/{two}/members", json=_member_payload(key="gl-00001")
+        )
+
+        r = await live_client.patch(
+            f"/admin/communities/{two}/members/gl-00001", json={"did": self.DID}
+        )
+
+        assert r.status_code == 409, r.text
+
+    async def test_patching_other_fields_leaves_the_did_alone(self, live_client):
+        """@verifies REQ-0060"""
+        key = await _seed_community(live_client, key="did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", did=self.DID),
+        )
+
+        r = await live_client.patch(
+            f"/admin/communities/{key}/members/m1", json={"name": "Renamed"}
+        )
+
+        assert r.json()["name"] == "Renamed"
+        assert r.json()["did"] == self.DID
+
+
+@pytest.mark.integration
 class TestNoWriteReducesASibling:
     """The invariant the whole module exists to protect.
 
@@ -587,6 +840,66 @@ class TestRoundTrip:
     """A community must export the same whether its members arrived by API or
     by bundle — otherwise a `git`-driven re-import silently reverts weeks of
     approvals, and the two write paths have quietly diverged."""
+
+    async def test_a_did_written_through_the_api_survives_the_round_trip(
+        self, live_client
+    ):
+        """The DID has to be carried by the bundle path as well as the API one.
+
+        A field added to one and forgotten in the other produces a community
+        that exports differently depending on how its members arrived — and for
+        this field the loss is silent: the member re-imports without its
+        dataspace identity, and the next consent-gated export finds nothing to
+        join on.
+
+        @verifies REQ-0059
+        """
+        did = "did:web:dataspace.example%3A30005:round-trip"
+        key = await _seed_community(live_client, key="rt-did-rec")
+        created = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="gl-00001", did=did),
+        )
+        assert created.status_code == 201, created.text
+
+        exported = await live_client.get(f"/admin/export?community_key={key}")
+        assert exported.status_code == 200, exported.text
+
+        import yaml
+
+        bundle = yaml.safe_load(exported.text)
+        assert bundle["members"]["gl-00001"]["did"] == did, (
+            "the exporter dropped the DID, so the bundle path never sees it"
+        )
+
+        reimport = await live_client.post(
+            "/admin/import", json={"bundle": bundle, "dry_run": False, "force": True}
+        )
+        assert reimport.status_code == 200, reimport.text
+
+        member = await live_client.get(f"/admin/communities/{key}/members/gl-00001")
+        assert member.json()["did"] == did
+        assert "did" not in member.json()["extra"]
+
+    async def test_a_member_without_a_did_exports_without_the_field(
+        self, live_client
+    ):
+        """`did: null` on every member of a community with no dataspace reads as
+        a field somebody forgot to fill in, rather than one that does not apply.
+
+        @verifies REQ-0059
+        """
+        key = await _seed_community(live_client, key="rt-no-did-rec")
+        await live_client.post(
+            f"/admin/communities/{key}/members", json=_member_payload(key="gl-00001")
+        )
+
+        exported = await live_client.get(f"/admin/export?community_key={key}")
+
+        import yaml
+
+        bundle = yaml.safe_load(exported.text)
+        assert "did" not in bundle["members"]["gl-00001"]
 
     async def test_api_created_member_survives_export_and_reimport(self, live_client):
         """@verifies REQ-0037"""
@@ -885,9 +1198,14 @@ class TestTheSchemaVersionThroughTheApi:
 
     @staticmethod
     def _bundle(key: str, **overrides) -> dict:
+        # The *current* version, read rather than typed: this class is about what
+        # the service says when a bundle does or does not match it, so a literal
+        # here turns every schema bump into an unrelated failure.
+        from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
+
         bundle = {
             "version": "1.0",
-            "schema_version": "0.5",
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "community": {
                 "id": key,
                 "name": "Versioned Community",

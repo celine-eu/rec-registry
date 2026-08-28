@@ -196,7 +196,14 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             # today — nothing changes — but naming them apart is what lets a
             # policy separate them later without an API change. Same reasoning
             # that split read from write below.
-            if "assets-by-user-ids" in path:
+            #
+            # `members-by-dids` resolves what a named person holds, from an
+            # identifier naming that person — the same disclosure as
+            # `assets-by-user-ids`, and a different one from asking which
+            # community a sensor sits in. It belongs on the same action by that
+            # reasoning, and would otherwise fall through to the broader
+            # `lookup` by default rather than by decision.
+            if "assets-by-user-ids" in path or "members-by-dids" in path:
                 return "assets.lookup"
             return "lookup"
         if "import" in path:

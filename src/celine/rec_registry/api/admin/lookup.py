@@ -8,6 +8,7 @@ Provides cross-community lookups:
 - Find member by user_id
 - Find asset by sensor_id
 - Find assets owned by a set of members
+- Find members holding a set of dataspace DIDs
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +28,7 @@ from celine.rec_registry.schemas.models import (
     LookupByDeliveryPointResponse,
     GlobalMemberLookup,
     GlobalAssetLookup,
+    DidsBatchRequest,
     SensorIdsBatchRequest,
     UserIdsBatchRequest,
 )
@@ -184,6 +186,7 @@ async def lookup_member_by_user_id(
         id=str(m.id),
         key=m.key,
         user_id=m.user_id,
+        did=m.did,
         name=m.name,
         role=m.role,
         area=m.area,
@@ -336,4 +339,70 @@ async def lookup_assets_by_user_ids(
             community_name=c.name,
         )
         for a, m, c in result.all()
+    ]
+
+
+@router.post(
+    "/lookup/members-by-dids",
+    operation_id="lookup_members_by_dids",
+    response_model=list[GlobalMemberLookup],
+)
+async def lookup_members_by_dids(
+    body: DidsBatchRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Find the members holding a set of dataspace DIDs, across all communities.
+
+    **Why it exists.** The connector answers *who consents* in DIDs; this
+    registry knows *what they hold*; nothing joined the two. Resolving a DID
+    through the identity registry to a Keycloak user id does not close the gap,
+    because `Member.user_id` holds a Keycloak *username* and the identifier that
+    hop returns matches no row here. So the DID is stored on the member and this
+    is the join.
+
+    **Members, not assets** — and that is the part it would be easy to get
+    wrong. Mirroring `assets-by-user-ids` exactly would lose the supply point in
+    the common case: ../onboarding writes the declared POD into
+    `Member.delivery_points` and registers **no assets**, because a meter's
+    `sensor_id` is assigned at physical installation, long after onboarding. An
+    asset-shaped answer is therefore empty for every participant whose meter has
+    not been commissioned yet. `GlobalMemberLookup` already carries
+    `delivery_points`; a commissioned meter stays reachable through the
+    `user_id` in the same row and the existing `assets-by-user-ids`.
+
+    **Bounded**, at the same 500 as the other two batch routes and from the same
+    constant.
+
+    **No enumeration oracle.** A DID that belongs to nobody and a member holding
+    no supply points are indistinguishable — an unknown DID contributes no row
+    and is not a `404`. The caller supplies the DIDs, so any difference between
+    those answers would make this a way to discover who is registered.
+
+    Every row carries its `did`, which is what lets the caller attribute the row
+    back to the DID it asked about.
+    """
+    if not body.dids:
+        return []
+
+    result = await session.execute(
+        select(Member, Community)
+        .join(Community, Member.community_id == Community.id)
+        .where(Member.did.in_(body.dids))
+    )
+
+    return [
+        GlobalMemberLookup(
+            id=str(m.id),
+            key=m.key,
+            user_id=m.user_id,
+            did=m.did,
+            name=m.name,
+            role=m.role,
+            area=m.area,
+            status=m.status,
+            delivery_points=[DeliveryPoint(**dp) for dp in (m.delivery_points or [])],
+            community_key=c.key,
+            community_name=c.name,
+        )
+        for m, c in result.all()
     ]

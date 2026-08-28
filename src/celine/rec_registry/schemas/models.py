@@ -121,6 +121,7 @@ class MemberListItem(BaseModel):
     id: str
     key: str
     user_id: str
+    did: str | None = None
     name: str
     role: str
     area: str
@@ -132,6 +133,7 @@ class MemberDetail(BaseModel):
     id: str
     key: str
     user_id: str
+    did: str | None = None
     name: str
     role: str
     area: str
@@ -268,6 +270,9 @@ class GlobalMemberLookup(BaseModel):
     id: str
     key: str
     user_id: str
+    # Present so a batch answer can be attributed back to the DID that was asked
+    # about, the same job `owner_user_id` does for `GlobalAssetLookup`.
+    did: str | None = None
     name: str
     role: str
     area: str
@@ -310,6 +315,10 @@ class UserMemberSummary(BaseModel):
     role: str
     area: str
     status: str
+    # Returned, unlike `user_id`, because the two are not the same kind of
+    # omission: the caller already knows the username they authenticated with,
+    # and does not know the DID an onboarding service minted on their behalf.
+    did: str | None = None
 
 
 class UserCommunitySummary(BaseModel):
@@ -336,6 +345,7 @@ class UserMemberDetail(BaseModel):
     role: str
     area: str
     status: str
+    did: str | None = None
     delivery_points: list[DeliveryPoint] = Field(default_factory=list)
     extra: dict[str, Any] = JsonField("UserMemberDetailExtra")
     created_at: str | None = None
@@ -421,6 +431,22 @@ class UserIdsBatchRequest(BaseModel):
 
     user_ids: list[str] = Field(..., max_length=MAX_BATCH_LOOKUP_IDS)
 
+
+class DidsBatchRequest(BaseModel):
+    """Members to resolve by their dataspace DID.
+
+    Bounded by the same constant as its two siblings, for the same reason: a
+    caller naming ten thousand DIDs in one request has a dump of the registry
+    rather than a lookup.
+
+    A DID is the identifier a consent record is written in, so the set the
+    caller holds is the set of people who consented — and this endpoint turns
+    that into the supply points they hold. Which makes the bound the same
+    security decision it is on the other two.
+    """
+
+    dids: list[str] = Field(..., max_length=MAX_BATCH_LOOKUP_IDS)
+
 # =============================================================================
 # Write requests (Admin)
 # =============================================================================
@@ -448,6 +474,11 @@ class MemberPatch(BaseModel):
     """
 
     user_id: str | None = None
+    # The route ../onboarding writes the dataspace identity through, because the
+    # DID is minted a step after the member is registered. Reassigning one that
+    # another member already holds is `409`; re-sending a member its own DID is
+    # a no-op success, because that write sits inside a retriable step.
+    did: str | None = None
     name: str | None = None
     type: str | None = None
     role: str | None = None

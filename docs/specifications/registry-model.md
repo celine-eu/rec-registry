@@ -37,6 +37,11 @@ structure and cannot be duplicated within a bundle.
 **`user_id` holds a Keycloak *username*, not a subject UUID** — see REQ-0053, which is
 where that becomes visible and costly.
 
+A member carries three identifiers and each answers a different question: `key` is what
+this community calls them, `user_id` is who they authenticate as, and `did` (REQ-0059) is
+who they are in the dataspace. Two of the three are wrong for any given use, which is why
+they are documented together at the column.
+
 ### REQ-0013 — a member declares what kind of thing it is, as a schema.org CURIE
 
 `type` carries `schema:Person`, `schema:GovernmentOrganization`, `schema:LocalBusiness`
@@ -108,8 +113,8 @@ imported as; stamping the older number on a document written in the newer shape 
 more convincing lie than the `1.0` it used to carry. A round trip of a current bundle
 therefore comes back declaring exactly what it declared going in.
 
-**The published schemas are not enforced.** `schemas/community/v0.4/community.schema.json`
-and `v0.5/` are documentation: there is no `jsonschema` dependency and nothing in `src/`
+**The published schemas are not enforced.** `schemas/community/v0.4/`, `v0.5/` and
+`v0.6/community.schema.json` are documentation: there is no `jsonschema` dependency and nothing in `src/`
 reads them. `CURRENT_SCHEMA_VERSION` is written down rather than derived from that
 directory, because `schemas/` does not ship in the Docker image — `tests/test_versions.py`
 holds the constant to the directory in the repository instead.
@@ -123,3 +128,38 @@ The refusal happens before any database work, so a malformed bundle cannot parti
 apply. That property matters more here than in most services because import is
 destructive (REQ-0032): a bundle that parsed halfway and then failed would have already
 deleted the community it was replacing.
+
+### REQ-0059 — a member may hold one dataspace DID, and no two members hold the same one
+
+`did` is optional on `MemberIn` and stored in its **own column** beside `user_id`, not
+under `extra`. It is the identifier the member is known by in the dataspace, and the join
+key between the connector's answer to *who consents* — which is stated in DIDs — and this
+registry's answer to *what they hold*.
+
+Its own column because it is a join key, resolved by an `IN` over a set of DIDs on every
+consent-gated export. Burying an identifier in JSONB makes it look like a declaration, and
+`MemberIn` is `extra="allow"`, so a `did` the row-building code did not know about would
+validate, import, and land in `extra` while the column stayed `NULL` — one member holding
+two records of its DID that disagree.
+
+**Optional.** The DID is minted a step *after* the member is registered — `../onboarding`
+registers at `rec_registry_member` and mints the identity at `dataspace_identity` — and a
+deployment with no dataspace never populates it at all. A bundle written before this field
+existed still parses, and exports omit the field entirely rather than writing `did: null`.
+
+**Unique registry-wide, not per community**, unlike `key` and `user_id`. `ix_member_did` is
+a unique index on `did` alone, and because Postgres treats NULLs as distinct it permits any
+number of members holding none while refusing a second holder of one.
+
+The global scope rests on a domain assumption, stated here as one: a person cannot be a
+member of two RECs, because the same supply point settled twice is double billing. If
+multi-REC membership ever arrives, this constraint is the first thing that has to be
+revisited.
+
+**Both write paths carry it.** A member created through the admin API and one that arrived
+in a YAML bundle hold the DID in the same column, and a community exports the same either
+way — the property REQ-0037 pins.
+
+It is published as **schema v0.6**, which adds this field and changes nothing else — so a
+v0.5 file is a valid v0.6 one. Like every schema under `schemas/community/`, that document
+is documentation and is not enforced (REQ-0018).

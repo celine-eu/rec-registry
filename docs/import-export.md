@@ -1,12 +1,12 @@
 # Import & Export
 
-## Bundle Format (v0.5)
+## Bundle Format (v0.6)
 
 The registry uses a YAML/JSON bundle format for import and export. A bundle encodes a full community graph:
 
 ```yaml
 version: "1.0"
-schema_version: "0.5"
+schema_version: "0.6"
 
 community:
   id: example_rec
@@ -47,6 +47,11 @@ community:
 
 members:
   member-001:
+    user_id: alice
+    # Optional. Minted a step after the member is registered, so it is usually
+    # written by `PATCH` at runtime rather than authored here — and omitted from
+    # an export entirely when the member has none.
+    did: "did:web:dataspace.example%3A30005:alice"
     name: Alice Rossi
     role: prosumer
     area: northern
@@ -73,7 +78,12 @@ Key differences from v0.4:
 - `members` is a dict keyed by member key (not a list)
 - Assets are nested under members as typed dicts (`assets.pv`, `assets.meter`, `assets.storage`, etc.)
 - Community has `areas`, `topology`, `legal`, `links`, `contact`, `settings`, `operators`
-- Schema version is `"0.5"` with bundle version `"1.0"`
+- Schema version is `"0.6"` with bundle version `"1.0"`
+
+v0.6 adds `member.did` and changes nothing else, so a v0.5 file is a valid v0.6 one. See
+[`schemas/community/v0.6/README.md`](../schemas/community/v0.6/README.md) for the field, and
+note that import reports an unmatched `schema_version` rather than refusing it — restoring a
+backup is the path a refusal would break.
 
 ## Import
 

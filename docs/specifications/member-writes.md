@@ -175,3 +175,35 @@ the member count afterwards — `tests/test_writes.py::TestNoWriteReducesASiblin
 is a **registry of writes, not a sample of them**: a new write endpoint must be added to
 it, and one that is missing from it is a write nobody has checked for the single thing the
 write API guarantees.
+
+### REQ-0060 — the dataspace DID is written by `PATCH`, and a clash names its holder only within the community
+
+`PATCH …/members/{mk}` accepts `did` alongside the fields of REQ-0024. There is **no
+dedicated route**: the DID is minted a step after the member is registered, so it arrives
+as an update to a row that already exists, and a write endpoint of its own would earn
+nothing `PATCH` already does while adding one more entry to REQ-0031's registry of writes.
+
+**Re-sending a member the DID it already holds is a `200` that changes nothing.**
+`../onboarding` writes it from a retriable step, so the same write arriving twice must not
+be a conflict — the member itself is excluded from the clash check, by row id rather than
+by member key, because keys repeat across communities and the check does not filter by one.
+
+**A DID another member already holds is `409`, and what the message says depends on where
+that member is:**
+
+- **Inside the community the caller addressed** — the response names the holding member's
+  key, as the `user_id` clash does, so the caller can act on it.
+- **In any other community** — the response says the DID belongs to another member and
+  names nobody. Which member of which community holds a DID is a question about people the
+  caller was not addressing, and answering it is the enumeration disclosure REQ-0045
+  exists to refuse.
+
+**Two writers at once get the same answer**, by the mechanism of REQ-0022: the check cannot
+see an uncommitted row, `ix_member_did` refuses the loser, and that refusal is translated
+into the same `409`. The translated message is the community-blind one — by then there is
+no holder in hand to name, which is the honest answer rather than a degraded one.
+
+Creating a member that carries an already-held DID answers `409` the same way. It has no
+application-level check of its own: the two checks in `create_member` read a list of the
+community's own members, and DID uniqueness is registry-wide, so a check would be a second
+query answering exactly what the index answers.

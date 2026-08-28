@@ -1,5 +1,5 @@
 version: "1.0"
-schema_version: "0.5"
+schema_version: "0.6"
 
 metadata:
   created: "2024-01-15"
@@ -69,6 +69,9 @@ community:
 members:
   ah-00001:
     user_id: "ah-00001"
+    # Optional, and shown on one member only: a DID is minted a step after the
+    # member is registered, so most members in a hand-written file have none.
+    did: "did:web:dataspace.example%3A30005:ah-00001"
     name: Participant AH-00001
     type: "schema:Person"
     role: consumer

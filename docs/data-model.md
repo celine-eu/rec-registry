@@ -26,13 +26,21 @@ A participant belonging to a community.
 | Field | Type | Description |
 |---|---|---|
 | `key` | `str` | Unique member identifier within the community |
-| `user_id` | `str` | Identity provider user ID |
+| `user_id` | `str` | Keycloak **username** the participant authenticates with — not a subject UUID |
+| `did` | `str?` | Dataspace decentralised identifier. Optional, unique across the whole registry |
 | `name` | `str` | Display name |
 | `role` | `str` | `consumer`, `prosumer`, `producer`, `operator`, or `admin` |
 | `area` | `str` | Reference to a community area key |
 | `status` | `str` | `pending`, `active`, `suspended`, or `inactive` |
 | `delivery_points` | `JSONB` | List of delivery point objects (`id`, `type`, `description`, `address`, `tariff`, `active`) |
 | `extra` | `JSONB` | Extensible properties; `extra.type` holds a schema.org CURIE |
+
+A member carries three identifiers and each answers a different question: `key` is what
+this community calls them, `user_id` is who they authenticate as, and `did` is who they are
+in the dataspace. `user_id` matches `preferred_username` in the token — a row written with
+a subject UUID exports cleanly and locks its owner out. `did` arrives after registration
+(the identity is minted a step later) and is absent entirely in a deployment with no
+dataspace.
 
 ### Asset
 

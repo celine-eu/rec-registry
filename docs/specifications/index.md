@@ -70,12 +70,16 @@ same change. The procedure is in the companion's testing playbook.
 | | |
 |---|---|
 | REQ-0001 – REQ-0010 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
-| REQ-0011 – REQ-0019 | [the registry model](registry-model.md) — what a community, member and asset are |
-| REQ-0020 – REQ-0031 | [member and community writes](member-writes.md) — how a community changes at runtime |
+| REQ-0011 – REQ-0019, REQ-0059 | [the registry model](registry-model.md) — what a community, member and asset are |
+| REQ-0020 – REQ-0031, REQ-0060 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037 | [import and export](import-and-export.md) — the destructive path, and its guard |
-| REQ-0038 – REQ-0045 | [cross-community lookup](lookup.md) — which community is this in |
+| REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
 | REQ-0054 – REQ-0058 | [operability](operability.md) — the CLI, health, version |
+
+Each page's own block was full and contiguous when the dataspace DID arrived, so
+REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
+belong to rather than renumbering three ranges to keep them tidy.
 
 ## What is not covered
 

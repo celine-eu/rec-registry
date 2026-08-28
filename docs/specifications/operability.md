@@ -65,6 +65,14 @@ readiness check that does.
 
 The route still answers with no database, for the same reason `/health` does.
 
+**The OpenAPI document derives both too.** `create_app` sets `info.version` from
+`api_version()` and names the bundle schema from `CURRENT_SCHEMA_VERSION`; they were the
+literals `"1.0.0"` and `"v0.4 schema"`, which is the same defect in a fifth place. It
+matters more here than in a docstring: `../celine-sdk` snapshots this API under
+`openapi/rec-registry/v<info.version>/` and generates its client from that directory, so a
+version that does not move while the document does overwrites a snapshot in place — and no
+consumer of the generated client can tell the API changed.
+
 ---
 
 ## What is not verified here

@@ -16,11 +16,16 @@ The rules these functions keep, in one place because they are easy to lose:
 * **JSONB collections merge by identity, not by position.** A member gaining a
   second supply point must not lose the first.
 * **The application check produces the message; the database makes it true.**
-  ``member`` carries unique indexes on ``(community_id, key)`` and
-  ``(community_id, user_id)``, so two writers whose pre-checks both pass — neither
-  can see the other's uncommitted row — do not both insert. The loser's
-  ``IntegrityError`` is translated back into the same ``MemberConflict`` the check
-  raises, so a race and an observed duplicate are indistinguishable to a caller.
+  ``member`` carries unique indexes on ``(community_id, key)``,
+  ``(community_id, user_id)`` and — globally — ``did``, so two writers whose
+  pre-checks both pass — neither can see the other's uncommitted row — do not
+  both insert. The loser's ``IntegrityError`` is translated back into the same
+  ``MemberConflict`` the check raises, so a race and an observed duplicate are
+  indistinguishable to a caller.
+
+  The DID index is the one that is **not** scoped to a community, so it is the
+  one most exposed to a race — and losing that race means disclosing one
+  person's supply points under another person's consent.
 """
 
 from __future__ import annotations
@@ -70,6 +75,11 @@ __all__ = [
 # Fields the model stores in columns; anything else on a MemberIn lands in `extra`.
 _MEMBER_COLUMNS = {
     "user_id",
+    # A column, so it must be named here or `build_member_extra` puts it in
+    # `extra` instead — `MemberIn` is `extra="allow"`, so a bundle carrying a
+    # `did` would validate, import, and leave one member holding two records of
+    # its DID that disagree.
+    "did",
     "name",
     "type",
     "role",
@@ -86,7 +96,11 @@ _DEFAULT_KEY_WIDTH = 5
 
 
 class MemberConflict(Exception):
-    """A member with this key or user_id already exists in the community."""
+    """This member's key, user_id or DID is already taken.
+
+    The first two clash within the community; the DID clashes anywhere in the
+    registry.
+    """
 
 
 class MemberNotFound(Exception):
@@ -102,11 +116,16 @@ class AssetKeyTaken(Exception):
 # "already exists" — a misleading 409 is worse than a 500 that claims nothing.
 _MEMBER_KEY_CONSTRAINT = "uq_member_community_key"
 _MEMBER_USER_ID_CONSTRAINT = "uq_member_community_user_id"
+_MEMBER_DID_CONSTRAINT = "ix_member_did"
 _ASSET_KEY_CONSTRAINT = "uq_asset_community_key"
 
 
 def member_conflict_from(
-    exc: IntegrityError, *, key: str | None = None, user_id: str | None = None
+    exc: IntegrityError,
+    *,
+    key: str | None = None,
+    user_id: str | None = None,
+    did: str | None = None,
 ) -> MemberConflict | None:
     """Translate a member unique-violation into the conflict the checks raise.
 
@@ -115,7 +134,7 @@ def member_conflict_from(
     refuses the second. Without this the caller gets a `500` for something the
     API already has a `409` for.
 
-    Returns ``None`` when the violation is not one of the two member unique
+    Returns ``None`` when the violation is not one of the three member unique
     indexes; the caller re-raises rather than guessing.
     """
     detail = str(getattr(exc, "orig", exc))
@@ -126,6 +145,12 @@ def member_conflict_from(
         return MemberConflict(
             f"A member with user_id {user_id!r} already exists in this community"
         )
+    if _MEMBER_DID_CONSTRAINT in detail:
+        # Deliberately unlike the two above: it names no holder. This index is
+        # global, so the member it collided with may be in a community the
+        # caller was not addressing, and saying which member holds a DID would
+        # answer a question about somebody else's community.
+        return MemberConflict(f"did {did!r} already belongs to another member")
     return None
 
 
@@ -249,6 +274,11 @@ async def create_member(
 
     Raises ``MemberConflict`` whether the duplicate was seen by the check below
     or refused by the unique index underneath it.
+
+    **A duplicate ``did`` has no check of its own here.** The two checks below
+    read a list of this community's members, and DID uniqueness is registry-wide
+    — a check would be a second query answering what ``ix_member_did`` already
+    answers, and answering it a moment earlier buys nothing a create can use.
     """
     existing = (
         await session.scalars(select(Member).where(Member.community_id == community.id))
@@ -269,6 +299,7 @@ async def create_member(
         community_id=community.id,
         key=key,
         user_id=member_in.user_id,
+        did=member_in.did,
         name=member_in.name,
         role=member_in.role,
         area=member_in.area,
@@ -284,7 +315,9 @@ async def create_member(
         # transaction is dead either way, and this function has one caller, which
         # answers 409 and does nothing else with the session.
         await session.rollback()
-        conflict = member_conflict_from(exc, key=key, user_id=member_in.user_id)
+        conflict = member_conflict_from(
+            exc, key=key, user_id=member_in.user_id, did=member_in.did
+        )
         if conflict is None:
             raise
         raise conflict from exc
@@ -307,8 +340,14 @@ async def apply_member_patch(
     ``delivery_points`` is deliberately **not** patchable here — it is a JSONB
     list, and a partial update that happens to omit it would otherwise read as
     "this member now has none". It has its own sub-resource.
+
+    ``did`` **is** patchable, and this is the route ../onboarding uses to write
+    it: the DID is minted a step after the member is registered, so it arrives
+    as an update to a row that already exists rather than as a field on the
+    create. Its uniqueness clash is answered by the caller — see
+    ``api/admin/writes.py::patch_member``.
     """
-    for field in ("name", "role", "area", "status", "user_id"):
+    for field in ("name", "role", "area", "status", "user_id", "did"):
         if field in patch and patch[field] is not None:
             setattr(member, field, patch[field])
 
