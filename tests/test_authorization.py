@@ -46,6 +46,22 @@ class TestActionDerivation:
             == "members.write"
         )
 
+    @pytest.mark.parametrize("method", ["PUT", "DELETE"])
+    def test_delivery_points_are_a_member_write(self, method):
+        """A delivery point sits under the member path and not under `/assets`,
+        so managing one needs the member grant, not the asset grant.
+
+        @verifies REQ-0002
+        """
+        assert (
+            action(
+                None,
+                "/admin/communities/rec-a/members/m1/delivery-points/pod-1",
+                method,
+            )
+            == "members.write"
+        )
+
     def test_assets_are_distinguished_from_members(self):
         """An asset path contains "/members" too, so ordering matters — get it
         wrong and asset writes silently need the member grant.

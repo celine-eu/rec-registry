@@ -8,7 +8,7 @@ path **and** the HTTP method, so reads and writes are separate grants:
 | Action | Reached by | Scope |
 |---|---|---|
 | `read` | any `GET` under `/admin` | `rec-registry.read` |
-| `members.write` | write methods on `…/members…` | `rec-registry.members.write` |
+| `members.write` | write methods on `…/members…`, delivery points included | `rec-registry.members.write` |
 | `members.purge` | `DELETE …/members/{key}?purge=true` | `rec-registry.members.purge` |
 | `assets.write` | write methods on `…/assets…` | `rec-registry.assets.write` |
 | `community.write` | write methods on a community or its areas | `rec-registry.community.write` |

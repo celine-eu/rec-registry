@@ -53,7 +53,8 @@ allow if {
     ])
 }
 
-# Create/update assets and their delivery points
+# Create/update assets. Delivery points are not assets: their writes live under
+# `…/members/{key}/delivery-points/…` and derive `members.write`.
 allow if {
     input.action.name == "assets.write"
     data.celine.scopes.has_any_scope([
