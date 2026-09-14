@@ -228,10 +228,27 @@ def build_delivery_points(points: Iterable[DeliveryPointIn]) -> list[dict[str, A
 
 
 def build_member_extra(member_in: MemberIn) -> dict[str, Any]:
-    """Everything on a member that is not a column, including its schema.org type."""
+    """Everything on a member that is not a column, including its schema.org type.
+
+    A model that *declares* ``extra`` (``MemberCreate``) has it merged in at the
+    top level, last, exactly as ``apply_member_patch`` merges it — so a client
+    sending one body to create and to patch gets one stored shape. A bundle
+    ``MemberIn`` declares no such field, so there an ``extra:`` key is one more
+    unknown key, as it always was.
+    """
+    # Asked of the class, not the instance: on a bundle `MemberIn` an unknown
+    # `extra` key is readable as an attribute too, and must not be merged.
+    declared = (
+        getattr(member_in, "extra", None) or {}
+        if "extra" in type(member_in).model_fields
+        else None
+    )
     return {
         **({"type": member_in.type} if member_in.type else {}),
-        **_extract_extra(member_in, _MEMBER_COLUMNS),
+        **_extract_extra(
+            member_in, _MEMBER_COLUMNS if declared is None else _MEMBER_COLUMNS | {"extra"}
+        ),
+        **(declared or {}),
     }
 
 

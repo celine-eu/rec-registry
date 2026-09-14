@@ -207,3 +207,19 @@ Creating a member that carries an already-held DID answers `409` the same way. I
 application-level check of its own: the two checks in `create_member` read a list of the
 community's own members, and DID uniqueness is registry-wide, so a check would be a second
 query answering exactly what the index answers.
+
+### REQ-0062 — a member's `extra` is stored at the same level on create as on patch
+
+`POST …/members` accepts `extra` as `PATCH` does (REQ-0024), and merges its keys into the
+member's `extra` at the top level. Body keys that are neither columns nor `extra` are still
+copied into `extra` as they always were; where one clashes with a key of `extra`, `extra`
+wins, as it does over `type` on a patch. So a client sending one body to either route gets
+one stored shape — before, create stored it one level down, at `extra.extra`.
+
+**A bundle member is not affected.** The bundle model does not declare `extra`: a bundle
+member's unknown keys already are the top level of `extra`, and the exporter writes them
+back there, so a literal `extra:` key in a bundle is kept as it arrived. An API-created
+member therefore exports with those keys flat and re-imports unchanged (REQ-0037).
+
+**Rows written before this are not rewritten.** A member created with `extra` earlier —
+`../onboarding`'s `declared_at_onboarding` among them — still holds it at `extra.extra`.

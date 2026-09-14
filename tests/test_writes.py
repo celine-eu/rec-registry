@@ -111,6 +111,42 @@ class TestDeliveryPointMerge:
         assert len(existing) == 1
 
 
+class TestMemberExtra:
+    _BASE = dict(user_id="u", name="n", role="consumer", area="a", status="active")
+
+    def test_a_declared_extra_merges_at_the_top_level_on_create(self):
+        """The body #41 reported: `extra` used to land at `extra.extra`.
+
+        @verifies REQ-0062
+        """
+        from celine.rec_registry.schemas.models import MemberCreate
+
+        member = MemberCreate(
+            **self._BASE,
+            type="schema:Person",
+            extra={"declared": {"has_pv": True}},
+            other={"x": 1},
+        )
+
+        assert member_service.build_member_extra(member) == {
+            "type": "schema:Person",
+            "declared": {"has_pv": True},
+            "other": {"x": 1},
+        }
+
+    def test_a_bundle_member_keeps_an_extra_key_as_it_arrived(self):
+        """A bundle member's unknown keys already are the top level of `extra`,
+        so the bundle contract is not changed by the create route's field.
+
+        @verifies REQ-0062
+        """
+        member = MemberIn(**self._BASE, extra={"declared": {"has_pv": True}})
+
+        assert member_service.build_member_extra(member) == {
+            "extra": {"declared": {"has_pv": True}}
+        }
+
+
 # =============================================================================
 # Live database
 # =============================================================================
@@ -247,6 +283,39 @@ class TestMemberWrites:
         )
 
         assert r.status_code == 409
+
+    async def test_extra_is_stored_at_one_level_whether_created_or_patched(
+        self, live_client
+    ):
+        """@verifies REQ-0062"""
+        key = await _seed_community(live_client)
+        body = {"extra": {"declared_at_onboarding": {"has_pv": True}}}
+
+        created = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m1", other={"x": 1}, **body),
+        )
+        assert created.status_code == 201, created.text
+        await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(key="m2", user_id="kc-0002", delivery_points=[]),
+        )
+        patched = await live_client.patch(
+            f"/admin/communities/{key}/members/m2", json=body
+        )
+        assert patched.status_code == 200, patched.text
+
+        stored = (
+            await live_client.get(f"/admin/communities/{key}/members/m1")
+        ).json()["extra"]
+        assert stored["declared_at_onboarding"] == {"has_pv": True}
+        assert "extra" not in stored
+        # Keys that are not `extra` still arrive the way they always did.
+        assert stored["other"] == {"x": 1}
+        assert (
+            patched.json()["extra"]["declared_at_onboarding"]
+            == stored["declared_at_onboarding"]
+        )
 
     async def test_status_transition(self, live_client):
         """@verifies REQ-0025"""
@@ -900,6 +969,39 @@ class TestRoundTrip:
 
         bundle = yaml.safe_load(exported.text)
         assert "did" not in bundle["members"]["gl-00001"]
+
+    async def test_extra_written_on_create_survives_the_round_trip_flat(
+        self, live_client
+    ):
+        """The exporter writes `extra`'s keys at the member's top level, so a
+        create that stored them flat must re-import flat as well.
+
+        @verifies REQ-0062
+        """
+        key = await _seed_community(live_client, key="rt-extra-rec")
+        created = await live_client.post(
+            f"/admin/communities/{key}/members",
+            json=_member_payload(
+                key="gl-00001", extra={"declared_at_onboarding": {"has_pv": True}}
+            ),
+        )
+        assert created.status_code == 201, created.text
+
+        exported = await live_client.get(f"/admin/export?community_key={key}")
+        import yaml
+
+        bundle = yaml.safe_load(exported.text)
+        assert bundle["members"]["gl-00001"]["declared_at_onboarding"] == {
+            "has_pv": True
+        }
+
+        reimport = await live_client.post(
+            "/admin/import", json={"bundle": bundle, "dry_run": False, "force": True}
+        )
+        assert reimport.status_code == 200, reimport.text
+
+        member = await live_client.get(f"/admin/communities/{key}/members/gl-00001")
+        assert member.json()["extra"] == created.json()["extra"]
 
     async def test_api_created_member_survives_export_and_reimport(self, live_client):
         """@verifies REQ-0037"""

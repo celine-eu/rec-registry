@@ -249,6 +249,10 @@ that reads correctly in an exported bundle.
 `user_id`, which are unique per community. It is usually written afterwards
 rather than here — see `PATCH` below.
 
+`extra` is optional, and its keys are merged into the member's `extra` at the
+top level — the same place `PATCH` puts them. Other body keys that are not member
+fields are kept in `extra` too.
+
 **Responses:** `201` with the member; `409` when the key or `user_id` is already
 taken, naming the existing key so the caller can switch to `PATCH`, or when the
 `did` is already held by another member anywhere in the registry; `404` for an

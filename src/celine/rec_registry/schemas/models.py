@@ -463,6 +463,12 @@ class MemberCreate(MemberIn):
     something that reads as foreign in an exported bundle."""
 
     key: str | None = None
+    # Declared so it merges into `Member.extra` at the level `PATCH` merges it.
+    # Left undeclared, `extra="allow"` copied it in as one more unknown key, and
+    # a client sending the same body to both routes got `extra.extra` on create
+    # and `extra` on patch. Not declared on the bundle `MemberIn`: there a
+    # member's unknown keys already are the top level of `extra`.
+    extra: dict[str, Any] | None = None
 
 
 class MemberPatch(BaseModel):
