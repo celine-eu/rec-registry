@@ -40,7 +40,7 @@ class TestMemberKeyMinting:
 
         @verifies REQ-0021
         """
-        assert member_service.next_member_key(["gl-00001", "gl-00002"]) == "gl-00003"
+        assert member_service.next_member_key(["ex-00001", "ex-00002"]) == "ex-00003"
 
     def test_keeps_the_observed_zero_padding(self):
         """@verifies REQ-0021"""
@@ -52,7 +52,7 @@ class TestMemberKeyMinting:
 
     def test_ignores_keys_that_are_not_numbered(self):
         """@verifies REQ-0021"""
-        assert member_service.next_member_key(["founder", "gl-00004"]) == "gl-00005"
+        assert member_service.next_member_key(["founder", "ex-00004"]) == "ex-00005"
 
     def test_gaps_do_not_reuse_a_key(self):
         """Reusing a freed number would hand a new person the identity of one who
@@ -60,7 +60,7 @@ class TestMemberKeyMinting:
 
         @verifies REQ-0021
         """
-        assert member_service.next_member_key(["gl-00001", "gl-00009"]) == "gl-00010"
+        assert member_service.next_member_key(["ex-00001", "ex-00009"]) == "ex-00010"
 
 
 # =============================================================================
@@ -204,11 +204,11 @@ class TestMemberWrites:
 
         r = await live_client.post(
             f"/admin/communities/{key}/members",
-            json=_member_payload(key="gl-00042"),
+            json=_member_payload(key="ex-00042"),
         )
 
         assert r.status_code == 201
-        assert r.json()["key"] == "gl-00042"
+        assert r.json()["key"] == "ex-00042"
 
     async def test_duplicate_key_is_refused(self, live_client):
         """Creating must not silently update: a retry with a changed payload
@@ -218,16 +218,16 @@ class TestMemberWrites:
         """
         key = await _seed_community(live_client)
         await live_client.post(
-            f"/admin/communities/{key}/members", json=_member_payload(key="gl-00001")
+            f"/admin/communities/{key}/members", json=_member_payload(key="ex-00001")
         )
 
         r = await live_client.post(
             f"/admin/communities/{key}/members",
-            json=_member_payload(key="gl-00001", user_id="kc-0002"),
+            json=_member_payload(key="ex-00001", user_id="kc-0002"),
         )
 
         assert r.status_code == 409
-        assert "gl-00001" in r.json()["detail"]
+        assert "ex-00001" in r.json()["detail"]
 
     async def test_duplicate_user_id_is_refused(self, live_client):
         """@verifies REQ-0022"""
@@ -823,14 +823,14 @@ class TestTheDataspaceDid:
         two = await _seed_community(live_client, key="did-rec-two")
         await live_client.post(
             f"/admin/communities/{one}/members",
-            json=_member_payload(key="gl-00001", did=self.DID),
+            json=_member_payload(key="ex-00001", did=self.DID),
         )
         await live_client.post(
-            f"/admin/communities/{two}/members", json=_member_payload(key="gl-00001")
+            f"/admin/communities/{two}/members", json=_member_payload(key="ex-00001")
         )
 
         r = await live_client.patch(
-            f"/admin/communities/{two}/members/gl-00001", json={"did": self.DID}
+            f"/admin/communities/{two}/members/ex-00001", json={"did": self.DID}
         )
 
         assert r.status_code == 409, r.text
@@ -927,7 +927,7 @@ class TestRoundTrip:
         key = await _seed_community(live_client, key="rt-did-rec")
         created = await live_client.post(
             f"/admin/communities/{key}/members",
-            json=_member_payload(key="gl-00001", did=did),
+            json=_member_payload(key="ex-00001", did=did),
         )
         assert created.status_code == 201, created.text
 
@@ -937,7 +937,7 @@ class TestRoundTrip:
         import yaml
 
         bundle = yaml.safe_load(exported.text)
-        assert bundle["members"]["gl-00001"]["did"] == did, (
+        assert bundle["members"]["ex-00001"]["did"] == did, (
             "the exporter dropped the DID, so the bundle path never sees it"
         )
 
@@ -946,7 +946,7 @@ class TestRoundTrip:
         )
         assert reimport.status_code == 200, reimport.text
 
-        member = await live_client.get(f"/admin/communities/{key}/members/gl-00001")
+        member = await live_client.get(f"/admin/communities/{key}/members/ex-00001")
         assert member.json()["did"] == did
         assert "did" not in member.json()["extra"]
 
@@ -960,7 +960,7 @@ class TestRoundTrip:
         """
         key = await _seed_community(live_client, key="rt-no-did-rec")
         await live_client.post(
-            f"/admin/communities/{key}/members", json=_member_payload(key="gl-00001")
+            f"/admin/communities/{key}/members", json=_member_payload(key="ex-00001")
         )
 
         exported = await live_client.get(f"/admin/export?community_key={key}")
@@ -968,7 +968,7 @@ class TestRoundTrip:
         import yaml
 
         bundle = yaml.safe_load(exported.text)
-        assert "did" not in bundle["members"]["gl-00001"]
+        assert "did" not in bundle["members"]["ex-00001"]
 
     async def test_extra_written_on_create_survives_the_round_trip_flat(
         self, live_client
@@ -982,7 +982,7 @@ class TestRoundTrip:
         created = await live_client.post(
             f"/admin/communities/{key}/members",
             json=_member_payload(
-                key="gl-00001", extra={"declared_at_onboarding": {"has_pv": True}}
+                key="ex-00001", extra={"declared_at_onboarding": {"has_pv": True}}
             ),
         )
         assert created.status_code == 201, created.text
@@ -991,7 +991,7 @@ class TestRoundTrip:
         import yaml
 
         bundle = yaml.safe_load(exported.text)
-        assert bundle["members"]["gl-00001"]["declared_at_onboarding"] == {
+        assert bundle["members"]["ex-00001"]["declared_at_onboarding"] == {
             "has_pv": True
         }
 
@@ -1000,7 +1000,7 @@ class TestRoundTrip:
         )
         assert reimport.status_code == 200, reimport.text
 
-        member = await live_client.get(f"/admin/communities/{key}/members/gl-00001")
+        member = await live_client.get(f"/admin/communities/{key}/members/ex-00001")
         assert member.json()["extra"] == created.json()["extra"]
 
     async def test_api_created_member_survives_export_and_reimport(self, live_client):
@@ -1008,10 +1008,10 @@ class TestRoundTrip:
         key = await _seed_community(live_client)
         await live_client.post(
             f"/admin/communities/{key}/members",
-            json=_member_payload(key="gl-00001", name="Round Trip"),
+            json=_member_payload(key="ex-00001", name="Round Trip"),
         )
         await live_client.put(
-            f"/admin/communities/{key}/members/gl-00001/assets/meter-1",
+            f"/admin/communities/{key}/members/ex-00001/assets/meter-1",
             json={
                 "key": "meter-1",
                 "asset_type": "meter",
@@ -1034,7 +1034,7 @@ class TestRoundTrip:
         )
         assert reimport.status_code == 200, reimport.text
 
-        member = await live_client.get(f"/admin/communities/{key}/members/gl-00001")
+        member = await live_client.get(f"/admin/communities/{key}/members/ex-00001")
         assert member.status_code == 200, "the API-created member did not survive"
         assert member.json()["name"] == "Round Trip"
         assert [dp["id"] for dp in member.json()["delivery_points"]] == [
@@ -1042,7 +1042,7 @@ class TestRoundTrip:
         ]
 
         assets = await live_client.get(
-            f"/admin/communities/{key}/assets", params={"owner": "gl-00001"}
+            f"/admin/communities/{key}/assets", params={"owner": "ex-00001"}
         )
         assert [a["sensor_id"] for a in assets.json()["items"]] == ["sensor-rt"]
 
@@ -1157,7 +1157,7 @@ class TestTwoWritersAtOnce:
                 holder,
                 community,
                 MemberIn(**_member_payload(user_id="kc-0001")),
-                key="gl-00001",
+                key="ex-00001",
             )
             # Flushed, not committed: invisible to the request below, and already
             # holding the index entry that request is about to want.
@@ -1165,7 +1165,7 @@ class TestTwoWritersAtOnce:
             request = asyncio.create_task(
                 live_client.post(
                     f"/admin/communities/{key}/members",
-                    json=_member_payload(key="gl-00001", user_id="kc-0002"),
+                    json=_member_payload(key="ex-00001", user_id="kc-0002"),
                 )
             )
             await _wait_until_blocked(pg_engine, holder_pid)
@@ -1173,7 +1173,7 @@ class TestTwoWritersAtOnce:
             r = await request
 
         assert r.status_code == 409, r.text
-        assert "gl-00001" in r.json()["detail"]
+        assert "ex-00001" in r.json()["detail"]
 
     async def test_a_concurrent_duplicate_user_id_is_a_409_not_a_500(
         self, live_client, pg_engine
@@ -1193,13 +1193,13 @@ class TestTwoWritersAtOnce:
                 holder,
                 community,
                 MemberIn(**_member_payload(user_id="kc-0001")),
-                key="gl-00001",
+                key="ex-00001",
             )
 
             request = asyncio.create_task(
                 live_client.post(
                     f"/admin/communities/{key}/members",
-                    json=_member_payload(key="gl-00002", user_id="kc-0001"),
+                    json=_member_payload(key="ex-00002", user_id="kc-0001"),
                 )
             )
             await _wait_until_blocked(pg_engine, holder_pid)
@@ -1264,13 +1264,13 @@ class TestTwoWritersAtOnce:
                 holder,
                 community,
                 MemberIn(**_member_payload(user_id="kc-0001")),
-                key="gl-00001",
+                key="ex-00001",
             )
 
             request = asyncio.create_task(
                 live_client.post(
                     f"/admin/communities/{key}/members",
-                    json=_member_payload(key="gl-00001", user_id="kc-0002"),
+                    json=_member_payload(key="ex-00001", user_id="kc-0002"),
                 )
             )
             await _wait_until_blocked(pg_engine, holder_pid)
@@ -1280,7 +1280,7 @@ class TestTwoWritersAtOnce:
         listing = await live_client.get(f"/admin/communities/{key}/members")
         assert listing.status_code == 200, listing.text
         members = listing.json()["items"]
-        assert [m["key"] for m in members] == ["gl-00001"]
+        assert [m["key"] for m in members] == ["ex-00001"]
         assert members[0]["user_id"] == "kc-0001"
 
 

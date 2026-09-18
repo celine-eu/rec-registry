@@ -459,7 +459,7 @@ class DidsBatchRequest(BaseModel):
 
 class MemberCreate(MemberIn):
     """Create one member. `key` is minted from the community's own numbering
-    when omitted, so a caller with no opinion still gets `gl-00007` rather than
+    when omitted, so a caller with no opinion still gets `ex-00007` rather than
     something that reads as foreign in an exported bundle."""
 
     key: str | None = None

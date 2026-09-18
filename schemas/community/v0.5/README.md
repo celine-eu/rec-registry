@@ -131,7 +131,7 @@ topology:
 
 ## `members`
 
-Dict keyed by a stable member ID (e.g. `gl-00001`). Required fields: `user_id`, `name`, `role`, `area`, `status`.
+Dict keyed by a stable member ID (e.g. `ex-00001`). Required fields: `user_id`, `name`, `role`, `area`, `status`.
 
 | Field | Description |
 |---|---|

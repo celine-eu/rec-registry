@@ -185,7 +185,7 @@ async def resolve_member(
 def next_member_key(existing: Sequence[str]) -> str:
     """Mint the next member key, following whatever pattern the community uses.
 
-    Communities number their members (``gl-00001``), and a caller that has no
+    Communities number their members (``ex-00001``), and a caller that has no
     opinion should get the next one in that series rather than a UUID that reads
     as foreign in an exported bundle. The prefix and zero-padding are taken from
     the highest-numbered existing key; a community with none starts at

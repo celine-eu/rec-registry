@@ -18,15 +18,15 @@ role, area, status and delivery points. A supplied `key` is honoured as given.
 ### REQ-0021 — an omitted key is minted from the community's own numbering
 
 `key` is optional. When absent it is taken from the highest-numbered existing key, with
-that key's prefix and zero-padding preserved: `gl-00001`, `gl-00002` → `gl-00003`;
+that key's prefix and zero-padding preserved: `ex-00001`, `ex-00002` → `ex-00003`;
 `ab-007` → `ab-008`. Keys that are not numbered are ignored when reading the pattern, and
 a community with no members at all starts at `member-00001`.
 
 A caller with no opinion should get the next key in the series rather than a UUID that
 reads as foreign in an exported bundle — the bundle is a file people edit.
 
-**A gap below the maximum is never reused.** `gl-00001`, `gl-00009` mints `gl-00010`, not
-`gl-00002`: reusing a freed number would hand a new person the identity of one who left,
+**A gap below the maximum is never reused.** `ex-00001`, `ex-00009` mints `ex-00010`, not
+`ex-00002`: reusing a freed number would hand a new person the identity of one who left,
 along with whatever history elsewhere in the platform still references that key.
 
 The bound on that guarantee is honest and narrow — the *highest* number is the only state

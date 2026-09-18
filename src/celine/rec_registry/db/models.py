@@ -120,7 +120,7 @@ class Member(Base):
     """
     Community member (participant).
     
-    - key: internal member key (e.g., "gl-00001")
+    - key: internal member key (e.g., "ex-00001")
     - user_id: Keycloak username the participant authenticates with — not a subject UUID
     - did: dataspace decentralised identifier, globally unique, absent until minted
     - role: consumer, prosumer, producer, operator, admin
@@ -150,7 +150,7 @@ class Member(Base):
     # They are documented together because the temptation is to reach for
     # whichever one is nearest, and two of the three are wrong for any given use.
     #
-    #   key      what this community calls them ("gl-00001"). Unique per
+    #   key      what this community calls them ("ex-00001"). Unique per
     #            community. It appears in exported bundles and in
     #            ../celine-policies and ../onboarding, so it is never reissued.
     #   user_id  who they authenticate as. A Keycloak **username** — the value
@@ -280,7 +280,7 @@ class Asset(Base):
         nullable=False,
     )
 
-    # Asset key (e.g., "pv-gl-00002", "meter-gl-00002")
+    # Asset key (e.g., "pv-ex-00002", "meter-ex-00002")
     key: Mapped[str] = mapped_column(String(128), nullable=False)
 
     # Asset type discriminator

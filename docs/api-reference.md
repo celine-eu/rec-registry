@@ -242,7 +242,7 @@ endpoint that deletes what it was not given is the bundle import above.
 Create one member, with its delivery points and assets.
 
 `key` is optional — when omitted it is minted from the community's own
-numbering (`gl-00001` → `gl-00002`), so a caller with no opinion still gets a key
+numbering (`ex-00001` → `ex-00002`), so a caller with no opinion still gets a key
 that reads correctly in an exported bundle.
 
 `did` is optional and unique across the whole registry, unlike `key` and
