@@ -878,6 +878,16 @@ class TestNoWriteReducesASibling:
         assert await count() == 2
 
         await live_client.patch(f"/admin/communities/{key}/members/m1", json={"name": "A"})
+        # Role and area through their own route (REQ-0070), accepted and refused.
+        r = await live_client.patch(
+            f"/admin/communities/{key}/members/m1/profile",
+            json={"role": "prosumer", "area": "south"},
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.patch(
+            f"/admin/communities/{key}/members/m1/profile", json={"area": "nowhere"}
+        )
+        assert r.status_code == 422, r.text
         await live_client.post(
             f"/admin/communities/{key}/members/m1/status", json={"status": "suspended"}
         )
@@ -899,6 +909,39 @@ class TestNoWriteReducesASibling:
         )
         await live_client.patch(f"/admin/communities/{key}", json={"description": "d"})
         await live_client.put(f"/admin/communities/{key}/areas/west", json={"name": "West"})
+
+        # Meters (REQ-0069, REQ-0071): an attach at `meter-<sensor id>`, one to
+        # a suspended member (unchecked), a refused reactivation, a detach, an
+        # accepted reactivation, and a refused `sensor_held` attach.
+        def meter(asset_key: str, sensor_id: str) -> dict:
+            return {
+                "key": asset_key,
+                "asset_type": "meter",
+                "properties": {
+                    "name": "M",
+                    "sensor_id": sensor_id,
+                    "meter_type": "consumption",
+                },
+            }
+
+        m1, m2 = (f"/admin/communities/{key}/members/{m}" for m in ("m1", "m2"))
+        r = await live_client.put(
+            f"{m2}/assets/meter-SEN-1", json=meter("meter-SEN-1", "SEN-1")
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.put(f"{m1}/assets/m1-meter", json=meter("m1-meter", "SEN-1"))
+        assert r.status_code == 200, r.text
+        r = await live_client.post(f"{m1}/status", json={"status": "active"})
+        assert r.status_code == 409, r.text
+        r = await live_client.delete(f"{m2}/assets/meter-SEN-1")
+        assert r.status_code == 204, r.text
+        r = await live_client.post(f"{m1}/status", json={"status": "active"})
+        assert r.status_code == 200, r.text
+        r = await live_client.put(
+            f"{m2}/assets/meter-SEN-1", json=meter("meter-SEN-1", "SEN-1")
+        )
+        assert r.status_code == 409, r.text
+
         await live_client.delete(f"/admin/communities/{key}/members/m2")  # soft
 
         assert await count() == 2

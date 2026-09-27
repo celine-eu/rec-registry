@@ -47,7 +47,8 @@ task run
 | `GET /admin/communities` | List/detail communities, members, assets, delivery points, meters |
 | `GET /admin/lookup/*` | Cross-community lookups by user ID, sensor ID, or delivery point |
 | `POST /admin/communities/{key}/members` | Create a member; sub-resources for its delivery points and assets |
-| `PATCH /admin/communities/{key}` | Update community metadata, areas |
+| `PUT\|DELETE /admin/communities/{key}/members/{member}/assets/meter-{sensor_id}` | Attach or detach a meter; one active holder per sensor id (`409 sensor_held`) |
+| `PATCH /admin/communities/{key}` | Update community metadata (areas have their own route) |
 | `POST /admin/import` | Import community from JSON bundle (**destructive**) |
 | `POST /admin/import/yaml` | Import communities from YAML multidocument (**destructive**) |
 | `GET /admin/export` | Export communities as YAML |
@@ -64,13 +65,17 @@ celine-rec-registry list
 celine-rec-registry tree --community example_rec
 celine-rec-registry lookup-user --user-id <id>
 celine-rec-registry lookup-sensor --sensor-id <id>
+celine-rec-registry duplicate-sensors                              # read-only; exits 1 if a sensor has two active holders
 ```
+
+A refusal a caller acts on answers `{"detail": "<sentence>", "code": "<code>"}` —
+see [refusal codes](docs/api-reference.md#refusal-codes).
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [Requirements](docs/specifications/index.md) | What the service must do — 58 requirements, each named by a test |
+| [Requirements](docs/specifications/index.md) | What the service must do — 76 requirements: 67 named by a test, 9 planned |
 | [Decisions](docs/decisions/index.md) | Why a technical choice was made |
 | [Data Model](docs/data-model.md) | Community, Member, Asset schema; JSONB fields; relationships |
 | [API Reference](docs/api-reference.md) | All endpoint groups, query params, responses |

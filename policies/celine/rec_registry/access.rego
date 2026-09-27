@@ -53,6 +53,21 @@ allow if {
     ])
 }
 
+# A member's role and area, and nothing else (PATCH …/members/{key}/profile).
+# The superset lives here and not in the shared matcher: `members.write` and
+# `.admin` already write role and area through the general PATCH, so a service
+# holding either keeps being able to use the narrow route without a new grant,
+# while a holder of `rec-registry.members.profile.write` alone reaches only
+# this route (REQ-0064).
+allow if {
+    input.action.name == "members.profile.write"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.members.profile.write",
+        "rec-registry.members.write",
+        "rec-registry.admin",
+    ])
+}
+
 # Create/update assets. Delivery points are not assets: their writes live under
 # `…/members/{key}/delivery-points/…` and derive `members.write`.
 allow if {
@@ -122,6 +137,9 @@ reason := "admin access granted" if {
 } else := "member write access granted" if {
     allow
     input.action.name == "members.write"
+} else := "member profile write access granted" if {
+    allow
+    input.action.name == "members.profile.write"
 } else := "member purge access granted" if {
     allow
     input.action.name == "members.purge"

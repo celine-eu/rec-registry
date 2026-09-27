@@ -75,6 +75,10 @@ The distinction is the requirement. A `403` would confirm that the key names som
 real, turning the route into a way to test whether a guessed asset key exists — and asset
 keys are guessable, being `meter-<member key>` in every bundle this service ships with.
 
+A meter a manager attaches is keyed `meter-<sensor id>` (REQ-0071) — guessable by
+anyone who knows the sensor id, which is printed on the device. The `404` matters as much for
+those keys as for these.
+
 ### REQ-0052 — a participant lists their own delivery points, and only their own
 
 `GET /user/delivery-points` answers the caller's supply points with a total.

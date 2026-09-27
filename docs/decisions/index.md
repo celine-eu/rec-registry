@@ -9,7 +9,7 @@ One file per decision, named `ADR-####-short-slug.md`, with this shape:
 # ADR-0001 — <the decision, as a statement>
 
 **Date:** <ISO-8601>
-**Status:** accepted | superseded by ADR-####
+**Status:** accepted | superseded by ADR-#### | accepted; amended by ADR-####
 
 ## Context
 <what forced a choice. The constraint, and what had already been tried.>
@@ -39,3 +39,11 @@ edited to say something else.
 | | |
 |---|---|
 | [ADR-0001](ADR-0001-requirements-are-read-out-of-the-code.md) | the requirements are read out of the code, and say what it does today |
+| [ADR-0002](ADR-0002-requirements-may-be-written-ahead-of-the-code-marked-planned.md) | requirements may be written ahead of the code, marked `planned` |
+| [ADR-0003](ADR-0003-role-and-area-have-their-own-route-and-action.md) | role and area are written through their own route and action, and no caller-supplied id can change an action |
+| [ADR-0004](ADR-0004-a-sensor-has-one-active-holder-and-detaching-deletes-the-meter.md) | a sensor id has one active holder across the registry, and detaching a meter deletes it |
+| [ADR-0005](ADR-0005-an-area-is-one-gse-primary-substation.md) | an area is one GSE primary substation, referenced by id and never stored as a shape |
+| [ADR-0006](ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md) | onboarding templates are the source of truth for areas, written through the area and topology routes |
+| [ADR-0007](ADR-0007-import-refuses-a-bundle-that-breaks-an-invariant.md) | import refuses a bundle that breaks an invariant, and old backups are reshaped rather than tolerated |
+| [ADR-0008](ADR-0008-a-refusal-carries-a-machine-readable-code.md) | a refusal carries a machine-readable code beside its message |
+| [ADR-0009](ADR-0009-a-community-is-retired-by-a-forced-empty-import.md) | a community is retired by a forced import with no members, and members arrive only through onboarding |

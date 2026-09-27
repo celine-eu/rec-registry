@@ -73,6 +73,36 @@ matters more here than in a docstring: `../celine-sdk` snapshots this API under
 version that does not move while the document does overwrites a snapshot in place — and no
 consumer of the generated client can tell the API changed.
 
+### REQ-0076 — the CLI reports sensor ids held by more than one active member, and writes nothing
+
+`celine-rec-registry duplicate-sensors` reads every community through `GET /admin/export` and
+prints one line per holder of each trimmed sensor id — trimmed as the registry trims it
+(REQ-0069), so an id exported with a tab or a no-break space around it is the same sensor —
+that more than one **active** member holds, in any communities: the sensor id, the community key, the member key, and how many
+active members hold it. A member holding one id under two asset keys is one holder. It exits
+`0` when there are none, `1` when there are, and `2` when the registry cannot be read — so an
+unreadable registry is never reported as clean.
+
+The registry refuses the next write that would make a second active holder (REQ-0069) but
+does not repair holders that already exist, and nothing else would find them: every write
+path now refuses to create one. This is the report ADR-0004 asks to run before the check is
+relied on. It issues one `GET` and no other request.
+
+### REQ-0077 — the CLI reports members whose role, status or area is out of set, and writes nothing
+
+`celine-rec-registry out-of-set-values` reads every community through `GET /admin/export` and
+prints one line per offending field: the community key, the member key, the field (`role`,
+`status` or `area`), and the value — `<missing>` when the export does not carry the field. A
+role or status is out of set when it is not one of REQ-0066's values, compared exactly; an area
+when it is not a key of **that member's own community's** `areas`. It exits `0` when there are
+none, `1` when there are, and `2` when the registry cannot be read — so an unreadable registry
+is never reported as clean. It prints no name, `user_id` or other personal field.
+
+The writes refuse such values from REQ-0066 on, but rows written before it are not repaired,
+and a re-import of their community is refused (REQ-0074). This is the report REQ-0066 asks to
+run before the check is relied on; it judges with the same function the writes do, so the two
+cannot disagree about what is out of set. It issues one `GET` and no other request.
+
 ---
 
 ## What is not verified here

@@ -25,7 +25,7 @@ def minimal_bundle() -> RegistryBundleIn:
             "community": {
                 "id": "test-rec",
                 "name": "Test REC",
-                "areas": {},
+                "areas": {"north": {"name": "North"}},
                 "topology": [],
             },
             "members": {
@@ -198,7 +198,7 @@ class TestWarnings:
                 "community": {
                     "id": "warn-rec",
                     "name": "Warn REC",
-                    "areas": {},
+                    "areas": {"north": {"name": "North"}},
                     "topology": [],
                 },
                 "members": {

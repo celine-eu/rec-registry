@@ -7,6 +7,8 @@ Commands:
 - list: List communities
 - tree: Show community structure
 - lookup: Lookup by user_id or sensor_id
+- duplicate-sensors: Report sensor ids held by more than one active member (read-only)
+- out-of-set-values: Report members whose role, status or area is out of set (read-only)
 
 Authentication:
 - Client credentials: --client-id + --client-secret (admin operations)
@@ -26,6 +28,8 @@ import yaml
 
 from celine.sdk.auth import OidcClientCredentialsProvider
 from celine.rec_registry.cli.config import settings
+from celine.rec_registry.core.member_values import member_value_refusals
+from celine.rec_registry.core.sensor_id import normalise_sensor_id
 
 app = typer.Typer(name="celine-rec-registry", no_args_is_help=True)
 
@@ -989,6 +993,327 @@ def lookup_sensor(
     typer.echo(f"Asset: {data.get('key')} ({data.get('name')})")
     typer.echo(f"Type: {data.get('asset_type')}")
     typer.echo(f"Sensor ID: {data.get('sensor_id')}")
+
+
+# =============================================================================
+# Read-only reports over one export
+# =============================================================================
+
+
+def _read_export(api: str, access_token: str, timeout: float) -> list[dict[str, Any]]:
+    """Every community, from one ``GET /admin/export``; exit ``2`` if unreadable.
+
+    The reports below write nothing and issue no other request, and an
+    unreadable registry is never reported as clean.
+    """
+    url = _api_url(api, "/admin/export")
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        r = httpx.get(url, headers=headers, timeout=timeout)
+    except httpx.HTTPError as exc:
+        typer.secho(f"HTTP error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+
+    if r.status_code >= 400:
+        typer.secho(
+            f"Export failed [{r.status_code}]: {r.text}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    try:
+        return [d for d in yaml.safe_load_all(r.text) if d is not None]
+    except yaml.YAMLError as exc:
+        typer.secho(f"Unreadable export: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+
+
+# =============================================================================
+# Duplicate Sensors Report
+# =============================================================================
+
+
+def find_duplicate_sensors(
+    bundles: list[dict[str, Any]],
+) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Every trimmed sensor id held by more than one active member.
+
+    Reads exported bundles, as `GET /admin/export` answers them, and returns
+    ``(sensor id, [(community key, member key), …])`` sorted by id. Only an
+    ``active`` member holds a sensor (REQ-0069), and ids are compared trimmed
+    — by ``normalise_sensor_id``, the registry's own definition, so ` SEN-1`,
+    `\tSEN-1\n` and `SEN-1` are one. A member holding one id under two asset
+    keys is one holder, not two.
+    """
+    holders: dict[str, set[tuple[str, str]]] = {}
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        community_key = str((bundle.get("community") or {}).get("id", ""))
+        for member_key, member in (bundle.get("members") or {}).items():
+            if not isinstance(member, dict) or member.get("status") != "active":
+                continue
+            meters = ((member.get("assets") or {}).get("meter")) or {}
+            for meter in meters.values():
+                sensor_id = normalise_sensor_id(
+                    str((meter or {}).get("sensor_id") or "")
+                )
+                if sensor_id:
+                    holders.setdefault(sensor_id, set()).add(
+                        (community_key, str(member_key))
+                    )
+    return [
+        (sensor_id, sorted(held_by))
+        for sensor_id, held_by in sorted(holders.items())
+        if len(held_by) > 1
+    ]
+
+
+@app.command("duplicate-sensors")
+def duplicate_sensors(
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
+):
+    """
+    Report every sensor id held by more than one active member (read-only).
+
+    The registry refuses the next write that would make a second active holder
+    of a sensor, but it does not repair holders that already exist. This lists
+    them — one line per holder: sensor id, community key, member key, and how
+    many active members hold that id — so they can be resolved by hand before
+    anyone relies on the check.
+
+    Reads every community through GET /admin/export (the export grant) and
+    writes nothing. Exits 0 when there are none, 1 when there are, and 2 when
+    the registry cannot be read.
+    """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    bundles = _read_export(api, access_token, timeout)
+
+    duplicates = find_duplicate_sensors(bundles)
+    if not duplicates:
+        typer.secho(
+            "No sensor id is held by more than one active member.",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    typer.echo("sensor_id\tcommunity\tmember\tactive_holders")
+    for sensor_id, held_by in duplicates:
+        for community_key, member_key in held_by:
+            typer.echo(f"{sensor_id}\t{community_key}\t{member_key}\t{len(held_by)}")
+    typer.secho(
+        f"{len(duplicates)} sensor id(s) held by more than one active member.",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+# =============================================================================
+# Out-of-set Values Report
+# =============================================================================
+
+
+_MISSING = "<missing>"
+
+
+def find_out_of_set_values(
+    bundles: list[dict[str, Any]],
+) -> list[tuple[str, str, str, str]]:
+    """Every member field the registry's write paths would now refuse.
+
+    Reads exported bundles, as ``GET /admin/export`` answers them, and returns
+    ``(community key, member key, field, value)`` sorted, for each member
+    whose ``role`` or ``status`` is outside its set, or whose ``area`` is not
+    a key of its community's ``areas`` (REQ-0066) — judged by
+    ``member_value_refusals``, the check the writes themselves run, so the
+    report and the check cannot disagree. A field the export does not carry is
+    reported with the value ``<missing>``.
+    """
+    found: list[tuple[str, str, str, str]] = []
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        community = bundle.get("community") or {}
+        community_key = str(community.get("id", ""))
+        areas = list((community.get("areas") or {}).keys())
+        for member_key, member in (bundle.get("members") or {}).items():
+            if not isinstance(member, dict):
+                continue
+            for out in member_value_refusals(
+                role=member.get("role"),
+                status=member.get("status"),
+                area=member.get("area"),
+                areas=areas,
+            ):
+                value = _MISSING if out.value is None else str(out.value)
+                found.append((community_key, str(member_key), out.field, value))
+    return sorted(found)
+
+
+@app.command("out-of-set-values")
+def out_of_set_values(
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
+):
+    """
+    Report every member whose role, status or area is out of set (read-only).
+
+    The registry refuses a role or status outside its set, and an area that is
+    not one of the member's community's areas, on every write path — but it
+    does not repair rows written before it did, and a re-import of such a
+    community is refused. This lists them — one line per field: community key,
+    member key, field, value — so they can be corrected before the check is
+    relied on.
+
+    Reads every community through GET /admin/export (the export grant) and
+    writes nothing. Exits 0 when there are none, 1 when there are, and 2 when
+    the registry cannot be read.
+    """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    found = find_out_of_set_values(_read_export(api, access_token, timeout))
+    if not found:
+        typer.secho(
+            "Every member's role, status and area is in set.",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    typer.echo("community\tmember\tfield\tvalue")
+    for community_key, member_key, field, value in found:
+        typer.echo(f"{community_key}\t{member_key}\t{field}\t{value}")
+    typer.secho(
+        f"{len(found)} out-of-set value(s) in "
+        f"{len({(c, m) for c, m, _, _ in found})} member(s).",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def main() -> None:

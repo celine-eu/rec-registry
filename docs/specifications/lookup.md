@@ -129,6 +129,9 @@ installation, long after onboarding. An asset-shaped answer is empty for every p
 whose meter has not been commissioned. A commissioned meter stays reachable through the
 `user_id` in the same row and REQ-0044.
 
+That stays true of onboarding; the meter is attached later by a community manager, at
+`meter-<sensor id>` (REQ-0071).
+
 **Every row carries its `did`**, which is what lets the caller attribute a row back to the
 DID it asked about — the same job `owner_user_id` does in REQ-0044.
 

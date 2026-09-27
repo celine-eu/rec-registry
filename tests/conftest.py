@@ -38,6 +38,9 @@ def mock_session():
     session.flush = AsyncMock()
     session.delete = AsyncMock()
     session.add = MagicMock()
+    # The importer's invariant check queries and locks; a mocked result holds no
+    # rows, so the check finds nothing to refuse.
+    session.execute = AsyncMock(return_value=MagicMock())
 
     begin_cm = MagicMock()
     begin_cm.__aenter__ = AsyncMock(return_value=None)
@@ -49,7 +52,10 @@ def mock_session():
 @pytest.fixture
 def app(mock_session):
     """Minimal FastAPI app without PolicyMiddleware."""
+    from celine.rec_registry.core.errors import install_error_handlers
+
     test_app = FastAPI()
+    install_error_handlers(test_app)
     test_app.include_router(management_router, prefix="/admin")
 
     async def override_session():
@@ -156,7 +162,10 @@ async def live_client(pg_engine):
     from celine.rec_registry.api.admin.management import router as management_router
     from celine.rec_registry.api.admin.writes import router as writes_router
 
+    from celine.rec_registry.core.errors import install_error_handlers
+
     app = FastAPI()
+    install_error_handlers(app)
     app.include_router(management_router, prefix="/admin")
     app.include_router(communities_router, prefix="/admin")
     app.include_router(lookup_router, prefix="/admin")

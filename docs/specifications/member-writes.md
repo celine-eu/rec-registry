@@ -77,6 +77,13 @@ A patch moving `user_id` to one already held by another member of the community 
 `409` — including when the holder's row was written concurrently and the clash check could
 not see it yet, which the unique index behind REQ-0022 is what catches.
 
+A patch setting `status: active` on a member that was not active re-checks its sensors, and
+the whole patch answers `409` `sensor_held` — changing nothing — when another active member
+holds one (REQ-0069).
+
+`role` is held to its set and `area` to the community's areas (REQ-0066), as on the narrower
+route role and area also have (REQ-0070).
+
 ### REQ-0025 — a status change is its own route, and records why
 
 `POST …/members/{mk}/status` moves a member through `pending`, `active`, `suspended`,
@@ -85,6 +92,10 @@ status answers `422`.
 
 Separate from `PATCH` because a status change is the transition an operator reasons about,
 and because it reads clearly in an audit log where a generic field update does not.
+
+A change to `active` re-checks the member's sensors, and answers `409` `sensor_held` rather
+than reactivating a member whose meter another active member now holds; the status is left as
+it was (REQ-0069). An unrecognised status carries the code `invalid_status` (REQ-0073).
 
 ### REQ-0026 — deleting deactivates; erasing is a different request and reports what it took
 
@@ -102,6 +113,10 @@ silently takes the member's measurement history with it.
 
 `assets_removed` is in the report for that reason: it is the number the caller did not ask
 about and needs to see.
+
+Deactivating releases the member's sensors, since only an active member holds one
+(REQ-0069). It does not release the asset keys: an inactive member's `meter-<sensor id>`
+still occupies that key in the community until the asset is deleted (REQ-0071).
 
 ### REQ-0027 — supply points merge by identity, never by position
 
@@ -138,14 +153,35 @@ member's — and the two outcomes behind that are different:
   meter onto this member, which is not what *replace my asset* asked for — and this is not
   only a race: two members using one key in sequence takes exactly the same path.
 
-`DELETE` on the same path answers `204`.
+`DELETE` on the same path answers `204`; an asset the member does not hold is `404`.
+
+A meter attached by a manager is keyed `meter-<sensor id>` and detached by this `DELETE`
+(REQ-0071); the upsert refuses a sensor another active member holds (REQ-0069), checked before
+the key; the key clash above carries the code `asset_key_taken`, distinct from `sensor_held`,
+and the `404` carries `asset_not_found` (REQ-0073).
+
+**An asset key longer than 128 characters — what `asset.key` holds — is refused `422`
+`asset_key_too_long`** before anything is written, on every path that writes assets: this
+upsert, creating a member with assets (REQ-0020), and the bundle import (REQ-0074), where it
+is an import refusal like `sensor_held`. It used to fail the insert and answer `500`. With the
+meter convention (REQ-0071) a sensor id longer than 122 characters reaches it. A coded refusal
+rather than a validation error, because the caller — a manager typing the id printed on a
+device — needs to tell it from the other outcomes of an attach by `code`. The `detail` gives
+the key's length and the limit, not the key, which can embed a sensor id.
+
+The upsert answers the stored asset, as `AssetDetail` (the body of the asset `GET`), so a
+generated client has its type.
 
 ### REQ-0029 — patching a community keeps its areas, and upserting an area keeps the others
 
 `PATCH /admin/communities/{ck}` updates `name`, `description`, `legal`, `links`, `contact`
-and `settings`, merging `extra`. It does not touch `areas` or `topology`, which have their
-own routes for the same reason delivery points do — they are collections with their own
-identity, and a patch omitting one would read as emptying it.
+and `settings`, merging `extra`. It does not touch `areas` or `topology`, for the same reason
+delivery points are absent from the member patch — they are collections with their own
+identity, and a patch omitting one would read as emptying it. Areas have their own route,
+below; **topology has none today**, and changes only through a bundle import.
+
+**Planned:** topology gains node routes (REQ-0072). The community `PATCH` stays outside the
+area invariant of REQ-0067, because it never touches either collection.
 
 `PUT …/areas/{key}` adds or replaces one area and returns the whole community, so the
 caller can see the others are still there.
@@ -159,6 +195,14 @@ area is removed and the community returned without it; an area that does not exi
 An orphaned `Member.area` is a dangling reference nothing else in the system checks. It
 would surface much later, and somewhere else, as a member belonging to an area that does
 not exist — and area membership is what the incentive calculation is computed over.
+
+The count is taken under an exclusive lock on the community's row, which a member write
+naming an area holds shared until it commits, so a member moved into the area at the same
+moment is counted rather than orphaned (REQ-0066).
+
+The refusal carries the code `area_in_use` (REQ-0073). It is the answer an onboarding
+template sync meets when it prunes an area that still has members, and the count in the
+message is what tells its operator how many to move first.
 
 ### REQ-0031 — no write reduces a sibling
 
@@ -175,6 +219,12 @@ the member count afterwards — `tests/test_writes.py::TestNoWriteReducesASiblin
 is a **registry of writes, not a sample of them**: a new write endpoint must be added to
 it, and one that is missing from it is a write nobody has checked for the single thing the
 write API guarantees.
+
+Attaching and detaching a meter (REQ-0071), a refused `sensor_held` attach, a
+reactivation, and the profile route (REQ-0070) — accepted and refused — are in it.
+
+**Planned:** the topology node `PUT` and `DELETE` (REQ-0072) join that registry in the change
+that adds them.
 
 ### REQ-0060 — the dataspace DID is written by `PATCH`, and a clash names its holder only within the community
 
@@ -223,3 +273,108 @@ member therefore exports with those keys flat and re-imports unchanged (REQ-0037
 
 **Rows written before this are not rewritten.** A member created with `extra` earlier —
 `../onboarding`'s `declared_at_onboarding` among them — still holds it at `extra.extra`.
+
+### REQ-0070 — a member's role and area are written through a route that accepts nothing else
+
+`PATCH /admin/communities/{ck}/members/{mk}/profile` accepts a body of `{role?, area?}`: at
+least one of the two, and no other key. An empty body, an unknown key, a `null`, or a key the
+general `PATCH` accepts — `user_id`, `did`, `status`, `name`, `type`, `extra` — answers `422`
+with FastAPI's validation body and changes nothing. `role` and `area` are checked as REQ-0066
+says (`422 invalid_role`, `422 unknown_area`); an unknown community or member is `404`
+`community_not_found` / `member_not_found`. A valid request answers `200` with the member, and
+absent fields are left alone as REQ-0024 leaves them. The member's status is not looked at,
+and its assets are left as they are.
+
+It derives `members.profile.write` (REQ-0063). Accepting nothing else is what makes that
+action narrower than `members.write` in fact and not only in name: a body that could carry a
+`user_id` would hand the narrower grant the identity rewrite REQ-0022 exists to stop. Decided
+in [ADR-0003](../decisions/ADR-0003-role-and-area-have-their-own-route-and-action.md).
+
+### REQ-0071 — a meter is attached at `meter-<sensor id>`, and detaching it deletes it
+
+A community manager attaches a meter with the asset `PUT` of REQ-0028 at
+`…/members/{mk}/assets/meter-<sensor id>`, the sensor id trimmed, `asset_type: meter`. The
+outcomes a caller must tell apart:
+
+- **attached** — `200`;
+- **already attached to this member** — `200`, the idempotent replace of REQ-0028;
+- **the sensor is held by another active member, in any community** — `409` `sensor_held`
+  (REQ-0069);
+- **the key is held by another member of this community** — which, with this convention, means
+  an inactive member still holds the asset — `409` `asset_key_taken`, not `sensor_held`,
+  because the remedy is different: delete that asset, then attach.
+
+The sensor check runs before the key check, so a key another *active* member holds for the
+same sensor answers `sensor_held`. A sensor id blank after trimming is `422`, and one long
+enough to make the key exceed 128 characters is `422` `asset_key_too_long` (REQ-0028). The registry does
+not enforce the key convention — it is the convention the dashboard uses, and an asset `PUT`
+at any other key is still the upsert of REQ-0028, still checked by REQ-0069.
+
+**Detaching is `DELETE` on the same path, and it is a hard delete** (`204`; `404`
+`asset_not_found` when the member holds no such asset, including one another member holds). Readings are joined to members without dates, so after a detach
+the sensor's whole history follows its next holder; keeping the previous holder's share is the
+job of dated holdings, a recorded follow-up and not this requirement. Decided in
+[ADR-0004](../decisions/ADR-0004-a-sensor-has-one-active-holder-and-detaching-deletes-the-meter.md).
+
+### REQ-0072 — topology nodes are written one at a time, merging by id
+
+**Status:** planned
+
+`PUT /admin/communities/{ck}/topology/{node_id}` adds or replaces exactly one node, keeping the
+others; re-sending an existing id replaces that node rather than duplicating it. The `id` in
+the body must match the one in the path, or `422`. `DELETE` removes one node and keeps the rest;
+a node the community does not have is `404`; a node an area still references is refused with
+`409` `topology_node_in_use`, naming the areas. Both derive `community.write` (REQ-0004).
+
+Both are checked against REQ-0067: a `PUT` changing the `type` of a node an area references
+away from `primary_substation` answers `422` `invalid_area_boundary`.
+
+Topology is a collection with its own identity, like delivery points (REQ-0027), and the
+merge-by-id rule is theirs for the same reason. It is the route an onboarding template sync
+writes a community's substations through. Decided in
+[ADR-0006](../decisions/ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md).
+
+### REQ-0073 — a refusal a caller acts on carries a code from a closed list
+
+The body of such a refusal is `{"detail": "<sentence>", "code": "<code>"}`. `detail` stays a
+string with its current meaning; the code sits beside it, never inside it. Clients — the SDK
+among them — branch on `code`, never on the wording of `detail`. The codes, and the requirement
+each comes from:
+
+| Code | Status | Refusal |
+|---|---|---|
+| `community_not_found` | `404` | a write naming an unknown community (REQ-0023) |
+| `member_not_found` | `404` | a write naming a member the community does not have (REQ-0024 – REQ-0028) |
+| `asset_not_found` | `404` | deleting an asset the member does not hold (REQ-0028, REQ-0071) |
+| `member_key_taken` | `409` | a member key already held in the community (REQ-0022) |
+| `user_id_taken` | `409` | a `user_id` already held in the community (REQ-0022, REQ-0024) |
+| `did_taken` | `409` | a DID held by another member anywhere (REQ-0060) |
+| `asset_key_taken` | `409` | an asset key held by another member of the community (REQ-0028, REQ-0071) |
+| `asset_key_too_long` | `422` | an asset key longer than the 128 characters `asset.key` holds, on every path that writes assets (REQ-0028) |
+| `sensor_held` | `409` | a sensor id held by another active member anywhere (REQ-0069) |
+| `area_in_use` | `409` | deleting an area members still reference (REQ-0030) |
+| `invalid_status` | `422` | a status outside the set, on every write path (REQ-0025, REQ-0066) |
+| `invalid_role` | `422` | a role outside the set, on every write path (REQ-0066) |
+| `unknown_area` | `422` | an area that is not a key of the community's areas, on every write path (REQ-0066) |
+
+`sensor_held` is `422` on an import, where the bundle is what is wrong (REQ-0069, REQ-0074).
+A route that answers a coded `422` declares its `422` in the OpenAPI document as either body —
+`oneOf` `ErrorResponse` and FastAPI's `HTTPValidationError`, whose `detail` is a list — since
+both arrive with that status: the member create, both `PATCH` routes (REQ-0070) and the status
+route, the asset `PUT`, and both import routes.
+The two `404` codes let a caller detaching a meter tell *"that member is gone"* from *"that
+meter is already detached"*. Every write route documents the body in the OpenAPI document as
+`ErrorResponse`, with the codes as the `ErrorCode` enum.
+
+A code names the rule, never the entity: it carries no key or id, and what the `detail` may name
+follows the rule already governing it (REQ-0060, REQ-0069). A code is added here by the
+requirement that introduces its refusal. An import refusal (REQ-0074) carries the code of the
+invariant it breaks. Refusals no requirement has given a code keep the plain
+`{"detail": "<sentence>"}` body — FastAPI's own validation errors, a body id or key that does
+not match the path, an unknown asset type, the import's `force` guard (REQ-0033), and the `404`
+for an unknown delivery point or area. Decided in
+[ADR-0008](../decisions/ADR-0008-a-refusal-carries-a-machine-readable-code.md).
+
+**Planned:** two more codes arrive with the refusals that introduce them —
+`topology_node_in_use` (`409`, deleting a node an area still references, REQ-0072) and
+`invalid_area_boundary` (`422`, an area breaking the one-substation rule, REQ-0067).

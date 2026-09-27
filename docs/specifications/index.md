@@ -5,12 +5,14 @@ What this service must do, stated so that a test can name it.
 These were **distilled from the code, not written before it** — see
 [ADR-0001](../decisions/ADR-0001-requirements-are-read-out-of-the-code.md). Every one is
 something the registry does today and something a reader would want to stay true; none is
-an aspiration.
+an aspiration — **except those marked `planned`**, which
+[ADR-0002](../decisions/ADR-0002-requirements-may-be-written-ahead-of-the-code-marked-planned.md)
+allows to land ahead of the code, and which say so (below).
 
 ## Why this service in particular
 
 **This is the platform's answer to "who is in this community".** It depends on almost
-nothing and is read by six other repositories, and **none of their suites runs against
+nothing and is read by eight other repositories, and **none of their suites runs against
 it**. That asymmetry is the reason a written, traceable requirement is worth more here
 than in a service with a user watching it: a wrong row here is wrong everywhere, and
 nothing downstream can tell.
@@ -19,6 +21,11 @@ Two of those consumers make it concrete. `../onboarding` **writes** members on a
 through SDK wrappers that are not in a published release yet. `../dataset-api` uses
 membership to decide access — so a member wrongly deactivated here is a member who cannot
 see their own data there, and the error surfaces three repositories away from its cause.
+
+Two more are about to write. The community dashboard's backend, `../celine-community`, will
+attach and detach meters and correct a member's role and area (REQ-0063, REQ-0066,
+REQ-0069 – REQ-0071), and `../onboarding` will write a community's areas and topology from its
+templates (REQ-0067, REQ-0072).
 
 ## None of them describes a defect
 
@@ -63,35 +70,61 @@ naming a requirement that does not exist is a typo — and a typo in a trace tag
 indistinguishable from coverage until someone reads the matrix.
 
 Adding a requirement means adding a `REQ-####` here **and** a test declaring it, in the
-same change. The procedure is in the companion's testing playbook.
+same change — unless it is planned. The procedure is in the companion's testing playbook.
+
+## Planned requirements
+
+A requirement written ahead of the code carries, directly under its heading:
+
+```markdown
+**Status:** planned
+```
+
+It states the behaviour the code will have and names the decision record it comes from. **No
+test declares it**, so the projection reads it as planned rather than unverified — and a
+`@verifies` tag naming it is an error: either the status is stale or the tag is wrong. The
+change that implements it adds its tests and removes the status line; an unmarked requirement
+is implemented. An implemented requirement whose behaviour a planned one will change keeps
+describing today, with a paragraph headed **Planned** pointing at the new one.
+
+```bash
+awk 'FNR==1{id=""} /^### REQ-/{id=$2} id && /^\*\*Status:\*\* planned/{print id; id=""}' docs/specifications/*.md | sort
+```
+
+Read against the two lists above: every requirement is either declared by a test or listed
+here, and never both. The checker that owns the matrix does not know the status line yet and
+reports planned requirements as unverified.
 
 ## The requirements
 
 | | |
 |---|---|
-| REQ-0001 – REQ-0010 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
-| REQ-0011 – REQ-0019, REQ-0059 | [the registry model](registry-model.md) — what a community, member and asset are |
-| REQ-0020 – REQ-0031, REQ-0060, REQ-0062 | [member and community writes](member-writes.md) — how a community changes at runtime |
-| REQ-0032 – REQ-0037 | [import and export](import-and-export.md) — the destructive path, and its guard |
+| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
+| REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069 | [the registry model](registry-model.md) — what a community, member and asset are |
+| REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073 | [member and community writes](member-writes.md) — how a community changes at runtime |
+| REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
 | REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
-| REQ-0054 – REQ-0058 | [operability](operability.md) — the CLI, health, version |
+| REQ-0054 – REQ-0058, REQ-0076 – REQ-0077 | [operability](operability.md) — the CLI, health, version |
 
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
-same way.
+same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 and REQ-0077.
 
 ## What is not covered
 
 Unverified by any suite here, whatever this document says. Each area's own page repeats the
 part that belongs to it.
 
-- **The six repositories that read this one.** `../digital-twin`, `../celine-webapp`,
-  `../onboarding`, `../celine-ai-assistant`, `../flexibility-api` and `../dataset-api` all
-  consume the registry through `celine.sdk.rec_registry`, and none of their suites runs
-  against this service. `../celine-policies`' `keycloak sync-users` reads a REC definition
-  from here out of band.
+- **The eight repositories that read this one.** `../digital-twin`, `../celine-webapp`,
+  `../onboarding`, `../celine-ai-assistant`, `../flexibility-api`, `../dataset-api` and the
+  community dashboard's backend `../celine-community` consume the registry through
+  `celine.sdk.rec_registry`; `../celine-pipelines` mirrors it from `GET /admin/export` and
+  reads each member's area topology. None of their suites runs against this service.
+  `../celine-policies`' `keycloak sync-users` reads a REC definition out of band — a
+  local-development path only; on a deployed realm members arrive through onboarding
+  ([ADR-0009](../decisions/ADR-0009-a-community-is-retired-by-a-forced-empty-import.md)).
 - **The middleware.** REQ-0001 – REQ-0008 pin `_get_admin_action`, a pure function, called
   directly. JWT parsing and verification, the decision cache, and the `401`/`403` a real
   request would receive are not exercised — the suite runs with `AUTH_ENABLED=false` and
@@ -113,7 +146,12 @@ part that belongs to it.
   `user_id` are covered (REQ-0022) — constraint, translation and test. No other overlapping
   write is. `asset` carries the same unique index on `(community_id, key)` and nothing
   translates it, so two callers creating one asset key at once still answer `500`; two
-  upserting an area resolve by last-writer-wins, unchecked.
+  upserting an area resolve by last-writer-wins, unchecked. One sensor attached to
+  two members at once is covered, serialised by an advisory lock (REQ-0069), and so is a
+  member moved into an area while it is deleted, serialised on the community's row
+  (REQ-0066). A planned
+  requirement adds one more race that must be covered when it lands: two areas written onto
+  one substation at once (REQ-0067).
 
 ## What is not here
 

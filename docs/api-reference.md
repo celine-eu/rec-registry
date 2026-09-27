@@ -3,7 +3,11 @@
 ## Authorization
 
 `/admin` routes need a JWT and an OPA decision. The action is derived from the
-path **and** the HTTP method, so reads and writes are separate grants:
+path **and** the HTTP method, so reads and writes are separate grants. Only the
+route's fixed segments are read, each at its position: a member key, asset key or
+any other id containing `lookup`, `import` or `export` never changes the action,
+and a path matching no route derives `admin`, which only `rec-registry.admin`
+satisfies (REQ-0065).
 
 | Action | Reached by | Scope |
 |---|---|---|
@@ -14,14 +18,47 @@ path **and** the HTTP method, so reads and writes are separate grants:
 | `community.write` | write methods on a community or its areas | `rec-registry.community.write` |
 | `import` / `export` | `/admin/import*`, `/admin/export` | `rec-registry.import` / `.export` |
 | `lookup` | `/admin/lookup/*` | `rec-registry.lookup` |
+| `assets.lookup` | `/admin/lookup/assets-by-user-ids`, `/admin/lookup/members-by-dids` | `rec-registry.lookup` |
 
 `rec-registry.admin` satisfies all of them (the shared matcher treats
 `{service}.admin` as covering `{service}.*`), so existing tokens keep working —
 but **do not give it to a service account**. Grant the actions it calls: a
-service that registers approved participants needs `members.write` and
-`assets.write`, and has no business importing, exporting or purging.
+service that registers approved participants needs `members.write`, one that
+attaches meters needs `assets.write`, and neither has any business importing,
+exporting or purging.
 
 Interactive OpenAPI docs are available at `http://localhost:8004/docs`.
+
+## Refusal codes
+
+A refusal a caller is expected to act on answers
+
+```json
+{"detail": "This sensor is already held by another active member", "code": "sensor_held"}
+```
+
+`detail` is a sentence for people and stays a string; branch on `code`, never on
+the wording (REQ-0073). The OpenAPI document names the body `ErrorResponse` and the
+codes `ErrorCode`.
+
+| Code | Status | Refusal |
+|---|---|---|
+| `community_not_found` | `404` | a write naming an unknown community |
+| `member_not_found` | `404` | a write naming a member the community does not have |
+| `asset_not_found` | `404` | deleting an asset the member does not hold |
+| `member_key_taken` | `409` | the member key is taken in the community |
+| `user_id_taken` | `409` | the `user_id` is taken in the community |
+| `did_taken` | `409` | the DID is held by another member anywhere |
+| `asset_key_taken` | `409` | the asset key is held by another member of the community |
+| `asset_key_too_long` | `422` | the asset key is longer than 128 characters (asset `PUT`, member create, import) |
+| `sensor_held` | `409` (`422` on an import) | another active member, in any community, holds the sensor |
+| `area_in_use` | `409` | deleting an area members still reference |
+| `invalid_status` | `422` | a status outside `pending`, `active`, `suspended`, `inactive` |
+
+Other refusals — FastAPI's validation errors, a body id or key that does not match
+the path, the import's `force` guard — keep the plain `{"detail": ...}` body. A route
+that answers a coded `422` documents its `422` as `oneOf` `ErrorResponse` and
+`HTTPValidationError` (whose `detail` is a list): both arrive with that status.
 
 ---
 
@@ -210,7 +247,14 @@ Import a community from a JSON bundle. Full replace: deletes existing community 
 
 **Request body:** `{bundle, dry_run, force}` (see [Import & Export](import-export.md)).
 
-**Response:** `ImportReport` with created counts.
+**Response:** `ImportReport` with created counts. A dry run also lists in
+`refusals` (`[{code, detail}]`) every invariant refusal the import would make.
+
+**Refused whole**, before anything is deleted, with `422` and the invariant's
+`code`, when the bundle breaks an invariant the runtime writes keep — today
+`sensor_held`: one trimmed sensor id held by two active members of the bundle, or
+by one of them and an active member of another community (that community and
+member are not named); or `asset_key_too_long`: an asset key over 128 characters. The replaced community's own current rows do not count.
 
 ### `POST /admin/import/yaml`
 
@@ -218,7 +262,8 @@ Import one or more communities from a YAML multidocument body. Each document is 
 
 **Request body:** `text/yaml` — multidocument YAML. Query: `dry_run`, `force`.
 
-**Response:** `MultiImportReport` with per-community results.
+**Response:** `MultiImportReport` with per-community results. A bundle breaking an
+invariant refuses the whole request as `POST /admin/import` does.
 
 ### `GET /admin/export`
 
@@ -254,9 +299,11 @@ top level — the same place `PATCH` puts them. Other body keys that are not mem
 fields are kept in `extra` too.
 
 **Responses:** `201` with the member; `409` when the key or `user_id` is already
-taken, naming the existing key so the caller can switch to `PATCH`, or when the
-`did` is already held by another member anywhere in the registry; `404` for an
-unknown community.
+taken (`member_key_taken`, `user_id_taken`), naming the existing key so the caller
+can switch to `PATCH`, or when the `did` is already held by another member
+anywhere in the registry (`did_taken`); `409 sensor_held` when an `active` member
+is created with a meter whose sensor another active member holds; `404
+community_not_found`; `422 invalid_status`.
 
 ### `PATCH /admin/communities/{community_key}/members/{member_key}`
 
@@ -270,16 +317,22 @@ delivery-point routes.
 minted a step after the member is registered. Re-sending a member the DID it
 already holds is a `200` that changes nothing, so the write is safe to retry.
 
-**Responses:** `200`; `409` if the new `user_id` belongs to another member of the
-community, or if the new `did` belongs to any other member in the registry. A DID
-clash inside the addressed community names the holding member; one in another
-community does not, because which member of which other community holds a DID is
-not the caller's question.
+**Responses:** `200`; `409 user_id_taken` if the new `user_id` belongs to another
+member of the community, or `409 did_taken` if the new `did` belongs to any other
+member in the registry. A DID clash inside the addressed community names the
+holding member; one in another community does not, because which member of which
+other community holds a DID is not the caller's question. `status: active` on a
+member that was not active re-checks its sensors: `409 sensor_held`, and nothing
+in the patch is applied, when another active member holds one.
 
 ### `POST /admin/communities/{community_key}/members/{member_key}/status`
 
 Move a member through `pending → active → suspended → inactive`, with an optional
 `reason` recorded on the member.
+
+A move to `active` re-checks the member's sensors — only an active member holds
+one — and answers `409 sensor_held`, leaving the status unchanged, when another
+active member took one meanwhile. An unknown status is `422 invalid_status`.
 
 ### `DELETE /admin/communities/{community_key}/members/{member_key}`
 
@@ -304,16 +357,41 @@ Create, replace or remove one asset. `properties` is validated against the model
 for `asset_type` (`pv`, `storage`, `meter`, `ev_charger`, `heat_pump`, `load`),
 so an EV charger cannot be stored carrying a heat pump's fields.
 
+**Attaching a meter** is a `PUT` at `meter-<sensor id>`, the id trimmed:
+
+```json
+{"key": "meter-SEN-1", "asset_type": "meter",
+ "properties": {"name": "Meter", "sensor_id": "SEN-1", "meter_type": "consumption"}}
+```
+
+| Outcome | Answer |
+|---|---|
+| attached | `200` with the stored asset (`AssetDetail`) |
+| already attached to this member | `200`, nothing changes |
+| another active member, in any community, holds the sensor | `409 sensor_held` — the holder is named by key only inside this community |
+| another member of this community holds the key (with the convention: an inactive member still holding the asset) | `409 asset_key_taken` |
+| the sensor id is blank after trimming | `422` |
+| the asset key is longer than 128 characters | `422 asset_key_too_long` |
+
+Sensor ids are compared and stored trimmed (of any Unicode whitespace); only an `active` member holds one, so
+a write to a member that is not active is checked when it is reactivated.
+
+**Detaching** is `DELETE` on the same path: a hard delete, `204`, after which the
+sensor may be attached elsewhere. An asset the member does not hold is `404
+asset_not_found`; an unknown member `404 member_not_found`.
+
 ### `PATCH /admin/communities/{community_key}`
 
-Update community metadata. Areas and topology have their own routes, for the same
-reason delivery points do.
+Update community metadata. It does not touch areas or topology, for the same
+reason the member patch does not touch delivery points: areas have their own
+route, below, and topology has no write route — it changes only through a bundle
+import.
 
 ### `PUT|DELETE /admin/communities/{community_key}/areas/{area_key}`
 
-Add, replace or remove one area. Deleting is refused with `409` while members
-still reference it — an orphaned `Member.area` is a dangling reference nothing
-else checks.
+Add, replace or remove one area. Deleting is refused with `409 area_in_use`
+while members still reference it — an orphaned `Member.area` is a dangling
+reference nothing else checks.
 
 ---
 

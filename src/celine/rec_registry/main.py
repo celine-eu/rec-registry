@@ -4,6 +4,7 @@ CELINE REC Registry API - Main application.
 
 from fastapi import FastAPI
 
+from celine.rec_registry.core.errors import install_error_handlers
 from celine.rec_registry.core.middleware import PolicyMiddleware
 from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION, api_version
 from celine.rec_registry.api.meta import router as meta_router
@@ -39,6 +40,9 @@ def create_app():
     # - POLICIES_ENABLED: Enable policies service integration
     # - POLICIES_URL: Policies service URL
     app.add_middleware(PolicyMiddleware)
+
+    # Refusals a caller acts on answer {"detail", "code"} (REQ-0073).
+    install_error_handlers(app)
 
     # Include routers
     app.include_router(user_router)

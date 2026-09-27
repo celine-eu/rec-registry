@@ -1,7 +1,7 @@
 # ADR-0001 — the requirements are read out of the code, and say what it does today
 
 **Date:** 2026-08-15
-**Status:** accepted
+**Status:** accepted; its first rule is amended by [ADR-0002](ADR-0002-requirements-may-be-written-ahead-of-the-code-marked-planned.md)
 
 ## Context
 

@@ -5,7 +5,7 @@ Pydantic response models for REC Registry API.
 from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from celine.rec_registry.schemas.bundle import MemberIn
 
@@ -491,6 +491,39 @@ class MemberPatch(BaseModel):
     area: str | None = None
     status: str | None = None
     extra: dict[str, Any] | None = None
+
+
+class MemberProfilePatch(BaseModel):
+    """A member's role and area, and nothing else (REQ-0070).
+
+    At least one of the two, and no other key: a body that could carry a
+    `user_id` would hand the narrower `members.profile.write` grant the identity
+    rewrite REQ-0022 exists to stop. Absent fields are left alone; neither may
+    be sent as `null`, since a member always has both.
+
+    The values are checked against their sets by the route, with a coded `422`
+    (`invalid_role`, `unknown_area`; REQ-0066), not here — a validation error
+    here has no `code`.
+    """
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    role: str | None = Field(
+        default=None,
+        description="One of consumer, prosumer, producer, operator, admin.",
+    )
+    area: str | None = Field(
+        default=None, description="A key of the community's `areas`."
+    )
+
+    @model_validator(mode="after")
+    def _names_one_and_no_null(self) -> "MemberProfilePatch":
+        if not self.model_fields_set:
+            raise ValueError("name at least one of role, area")
+        for name in sorted(self.model_fields_set):
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} may not be null")
+        return self
 
 
 class MemberStatusChange(BaseModel):

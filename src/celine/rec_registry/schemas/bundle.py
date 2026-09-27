@@ -374,12 +374,21 @@ class ImportRequest(BaseModel):
     force: bool = False
 
 
+class ImportRefusal(BaseModel):
+    """One invariant the bundle breaks, and the code of that invariant (REQ-0073)."""
+    code: str
+    detail: str
+
+
 class ImportReport(BaseModel):
     """Import operation report."""
     community_key: str
     deleted: dict[str, int] = Field(default_factory=dict)
     inserted: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    # Filled by a dry run only: every refusal the import would make. A real
+    # import that meets one answers 422 instead, and writes nothing.
+    refusals: list[ImportRefusal] = Field(default_factory=list)
 
 
 class MultiImportReport(BaseModel):

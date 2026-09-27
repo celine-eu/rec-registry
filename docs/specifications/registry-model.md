@@ -25,14 +25,23 @@ The shape itself is described in [the data model](../data-model.md) and
 Areas are the load-bearing part: a member names one, and the incentive calculation the
 platform performs depends on which primary-substation area a member sits in.
 
+Nothing today holds an area to that reading: an area may list any number of node ids, a node
+id need not exist in `topology`, and two areas may list the same node.
+
+**Planned:** an area references one primary-substation boundary and lists exactly that node
+(REQ-0067), published as schema v0.7 (REQ-0068).
+
 ### REQ-0012 — a member belongs to exactly one community and states its role, area and status
 
 `MemberIn` requires `user_id`, `name`, `role`, `area` and `status`. Members are keyed by
 member key in a dict rather than held in a list, so the key is part of the document
 structure and cannot be duplicated within a bundle.
 
-`role` is one of `consumer`, `prosumer`, `producer`, `operator`, `admin`; `status` one of
-`pending`, `active`, `suspended`, `inactive`.
+`role` is one of `consumer`, `prosumer`, `producer`, `operator`, `admin`, `status` one of
+`pending`, `active`, `suspended`, `inactive`, and `area` a key of the community's `areas` —
+held on every write path, the bundle import among them (REQ-0066). The models type the three
+as plain strings on purpose, so that a value outside its set is refused with a code rather
+than as a validation error (REQ-0073).
 
 **`user_id` holds a Keycloak *username*, not a subject UUID** — see REQ-0053, which is
 where that becomes visible and costly.
@@ -67,6 +76,10 @@ delivery point the meter sits on, and `meter_type` is `consumption`, `production
 `bidirectional`.
 
 A meter without a `sensor_id` is not stored — see REQ-0035.
+
+The column carries a lookup index, not a uniqueness constraint: at most one **active** holder
+per trimmed sensor id across the registry is kept by the writes (REQ-0069), and new writes
+store the id trimmed. Rows written before that are kept as they were.
 
 ### REQ-0016 — assets declare their relationships to each other
 
@@ -107,6 +120,11 @@ This is deliberately **not** a compatibility gate: an incompatible bundle is sti
 and partially applied. Refusing would break restoring a backup, and a backup is restored
 when something has already gone wrong. What changed is that it is no longer silent.
 
+A bundle holding one sensor on two active members is refused whatever version it declares
+(REQ-0069), and so is one whose members break REQ-0066 (REQ-0074). **Planned:** so is one
+breaking REQ-0067 — so a backup written before schema v0.7 has to be reshaped before it
+restores.
+
 **An export declares the version it emits**, not the version its rows arrived under. An
 export is built from today's model, so it conforms to today's schema whatever it was
 imported as; stamping the older number on a document written in the newer shape would be a
@@ -128,6 +146,11 @@ The refusal happens before any database work, so a malformed bundle cannot parti
 apply. That property matters more here than in most services because import is
 destructive (REQ-0032): a bundle that parsed halfway and then failed would have already
 deleted the community it was replacing.
+
+A member whose `area` is not a key of the bundle's `community.areas`, or whose `role` or
+`status` is outside its set, is refused before any database work too — by the import's
+invariant check rather than at parse time, so that the refusal carries its code (REQ-0066,
+REQ-0074). A bundle carrying members carries their areas.
 
 ### REQ-0059 — a member may hold one dataspace DID, and no two members hold the same one
 
@@ -163,3 +186,120 @@ way — the property REQ-0037 pins.
 It is published as **schema v0.6**, which adds this field and changes nothing else — so a
 v0.5 file is a valid v0.6 one. Like every schema under `schemas/community/`, that document
 is documentation and is not enforced (REQ-0018).
+
+### REQ-0066 — role and status are closed sets on every write path, and a member's area is one of its community's
+
+`role` must be one of `consumer`, `prosumer`, `producer`, `operator`, `admin`, and `status` one
+of `pending`, `active`, `suspended`, `inactive` — on creating a member, on both member
+`PATCH` routes — the general one, which keeps accepting `role` and `area` for
+`members.write` holders (REQ-0024), and the profile route (REQ-0070) — on the status route,
+and in a bundle. `area` must be a key of the community's `areas` — in a bundle, of the
+bundle's own `community.areas`, since the import replaces the community. A value outside the
+set answers `422` with the code of REQ-0073 — `invalid_role`, `invalid_status` or
+`unknown_area` — naming the value and the valid ones, and changes nothing; in a bundle it
+refuses the import (REQ-0074). The comparison is exact: no case folding, no trimming. A
+`PATCH` checks only the fields it names, so a member stored before the check can still be
+renamed. A role change leaves the member's assets as they are.
+
+A member write naming an area and an area delete (REQ-0030) are serialised on the
+community's row: the write holds it shared from its check to its commit, the delete takes it
+exclusively before counting the members that reference the area. Without that, each could
+pass against the other's uncommitted half and leave a member in an area that does not exist.
+
+These are the sets the published JSON Schemas (v0.4–v0.6) and the platform ontology already
+declare, held to the schema by a test; the registry was the last place still accepting
+anything. A manager correcting a member's role and area is the reason they matter now: the
+role decides whether a meter's production counts, and the area decides its substation. The
+report of rows already outside the sets is `out-of-set-values` (REQ-0077). Decided in
+[ADR-0003](../decisions/ADR-0003-role-and-area-have-their-own-route-and-action.md) and
+[ADR-0007](../decisions/ADR-0007-import-refuses-a-bundle-that-breaks-an-invariant.md).
+
+### REQ-0067 — an area is one GSE primary substation: one boundary, one node, the same id
+
+**Status:** planned
+
+Every area carries `boundary: {source, id}`, where `source` is `gse_cabine_primarie` and `id`
+is the substation code (`cod_ac`), and its `topology` lists **exactly one** node id — a node of
+the community's `topology` whose `type` is `primary_substation` and whose `id` equals
+`boundary.id`. No two areas of one community carry the same `boundary.id`, including when two
+writers race.
+
+A write that would leave a community breaking this answers `422` with the code
+`invalid_area_boundary` (REQ-0073): the area `PUT`, the topology node `PUT` and `DELETE`
+(REQ-0072), and the bundle import (REQ-0074). The community `PATCH` is not among them because
+it never touches areas or topology (REQ-0029).
+
+The area `PUT` stores `boundary` and `topology` and returns them; today its model has no
+`boundary`, drops unknown keys, and the area it returns carries neither field. `geometry` and
+`location` stay accepted and unused; the registry does not check `boundary.id` against the GSE
+dataset, which it cannot read.
+
+The pipelines already take an area's first node as its members' primary substation; this
+makes it the only one, so the reading is right rather than lucky. Decided in
+[ADR-0005](../decisions/ADR-0005-an-area-is-one-gse-primary-substation.md).
+
+### REQ-0068 — the bundle schema is published as v0.7
+
+**Status:** planned
+
+`schemas/community/v0.7/community.schema.json` adds `Area.boundary` and the cardinality of
+REQ-0067 and changes nothing else. `CURRENT_SCHEMA_VERSION` becomes `0.7`, and so do `/version`
+and the name of the bundle schema in the OpenAPI document; the package version, and with it
+`info.version` (REQ-0058), moves in the same change, so the SDK's snapshot of this API is a new
+one rather than an overwrite.
+
+A v0.6 file with no areas stays a valid v0.7 one; a v0.6 file with areas is not, since none of
+its areas carries a boundary. Like every published schema it is documentation, not enforced
+(REQ-0018); REQ-0067 is what enforces it. Decided in
+[ADR-0005](../decisions/ADR-0005-an-area-is-one-gse-primary-substation.md).
+
+### REQ-0069 — a sensor id has at most one active holder across the whole registry
+
+No two members whose status is `active` hold a meter with the same sensor id, in one community
+or in two. The comparison is on the **trimmed** id, and new writes store it trimmed; an id
+that is blank after trimming is missing (REQ-0035). **Trimmed has one definition**: every
+character Python's `str.isspace()` accepts — tab, newline, no-break space and the other
+Unicode spaces as well as the ASCII space — stripped from both ends, spelled out once
+(`core/sensor_id.py`) and used alike by the writes, by the SQL comparing rows already stored
+(`btrim` with that character set, not its one-argument form, which strips only the space) and
+by the duplicates report (REQ-0076). A member whose status is not `active`
+holds nothing, so deactivating a member releases its sensors (REQ-0026).
+
+Checked on every path that can make an active member hold a sensor: the asset `PUT` (REQ-0028,
+REQ-0071), creating a member with assets (REQ-0020), a status change to `active` through the
+status route or `PATCH` (REQ-0024, REQ-0025), and the bundle import (REQ-0074). A clash answers
+`409` with the code **`sensor_held`** (REQ-0073). **Reactivation re-checks:** a member whose
+sensor was taken by another active member while it was not `active` is refused `sensor_held`
+on the status change, and its status is left unchanged.
+
+**Check and write run under one transaction-scoped advisory lock keyed on the trimmed id**, so
+two writers attaching one sensor to two members at once get one success and one `sensor_held`.
+
+**A write that can make a member hold a sensor locks that member's row first** (`SELECT … FOR
+UPDATE`), and reads its status and sensor ids after the lock: the asset `PUT` and every move
+to `active`. An attach to a member who is not active is not checked, and a reactivation
+checks the sensors the member holds — so, without the row lock, an attach to a suspended
+member running at the same moment as its reactivation would each miss the other's
+uncommitted half and leave two active holders. With it, whichever runs second sees the
+first's result and checks. The import locks the replaced community's member rows before its
+advisory locks, the same order, so no two writers wait on each other in a cycle.
+
+**The answer names nobody outside the community addressed.** A holder inside it may be named
+by member key, as the DID clash names its holder (REQ-0060); a holder in any other community is
+not named, and neither is its community — which member of which other community holds a
+sensor is the enumeration disclosure REQ-0045 refuses.
+
+On the import the refusal is `422` `sensor_held` — the bundle is what is wrong — naming this
+bundle's member and asset keys, before anything is deleted; a dry run lists it in the report's
+`refusals` and answers `200`. The replaced community's own current rows do not count, since the
+import deletes them. The comparison with rows already stored is trimmed too, so an untrimmed id
+written earlier — with spaces, a tab, a newline or a no-break space around it — still counts. A member already `active` is not re-checked by a patch that
+leaves it active.
+
+**Existing duplicates are not repaired, and do not block unrelated writes.** The check refuses
+the next write, not the past ones; `celine-rec-registry duplicate-sensors` lists them
+(REQ-0076).
+
+Two holders double-count every reading of the sensor in every consumer that joins readings to
+members, and nothing downstream can tell. Decided in
+[ADR-0004](../decisions/ADR-0004-a-sensor-has-one-active-holder-and-detaching-deletes-the-meter.md).

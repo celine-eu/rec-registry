@@ -21,6 +21,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from celine.rec_registry.core.errors import ErrorCode, RegistryError, error_responses
+from celine.rec_registry.core.member_values import OutOfSet, member_value_refusals
 from celine.rec_registry.db.models import Asset, Community, Member
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.schemas.bundle import (
@@ -35,6 +37,7 @@ from celine.rec_registry.schemas.bundle import (
 from celine.rec_registry.schemas.models import (
     Area,
     AreaUpsert,
+    AssetDetail,
     AssetUpsert,
     CommunityDetail,
     CommunityPatch,
@@ -44,6 +47,7 @@ from celine.rec_registry.schemas.models import (
     MemberCreate,
     MemberDetail,
     MemberPatch,
+    MemberProfilePatch,
     MemberStatusChange,
     TopologyNode,
 )
@@ -62,8 +66,44 @@ ASSET_MODELS = {
     "load": LoadAssetIn,
 }
 
-# The lifecycle `Member.status` has always documented but nothing could drive.
-MEMBER_STATUSES = ("pending", "active", "suspended", "inactive")
+def _refuse_out_of_set(found: list[OutOfSet]) -> None:
+    """``422`` with the first value's code; the detail names every one (REQ-0066)."""
+    if found:
+        raise RegistryError(422, "; ".join(f.detail for f in found), found[0].code)
+
+
+async def _check_member_values(
+    session: AsyncSession, community: Community, fields: dict
+) -> None:
+    """Hold ``role``, ``status`` and ``area`` among ``fields`` to their sets.
+
+    A field absent from ``fields``, or ``None`` in it — which a patch leaves
+    alone — is not checked. Checking an area locks the community's row first
+    (``lock_community``), so the area cannot be deleted between this check and
+    the caller's commit.
+    """
+    given = {
+        name: fields[name]
+        for name in ("role", "status", "area")
+        if fields.get(name) is not None
+    }
+    if "area" in given:
+        await member_service.lock_community(session, community, share=True)
+        given["areas"] = list((community.areas or {}).keys())
+    _refuse_out_of_set(member_value_refusals(**given))
+
+
+def _check_status(status: str | None) -> None:
+    if status is not None:
+        _refuse_out_of_set(member_value_refusals(status=status))
+
+
+def _sensor_held(exc: member_service.SensorHeld) -> RegistryError:
+    return RegistryError(409, str(exc), ErrorCode.SENSOR_HELD)
+
+
+def _asset_key_too_long(exc: member_service.AssetKeyTooLong) -> RegistryError:
+    return RegistryError(422, str(exc), ErrorCode.ASSET_KEY_TOO_LONG)
 
 
 def _member_detail(member: Member) -> MemberDetail:
@@ -93,7 +133,7 @@ async def _resolve(
         member = await member_service.resolve_member(session, community, member_key)
         return community, member
     except member_service.MemberNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise RegistryError(404, str(exc), exc.code) from exc
 
 
 # =============================================================================
@@ -105,6 +145,7 @@ async def _resolve(
     "/communities/{community_key}/members",
     response_model=MemberDetail,
     status_code=201,
+    responses=error_responses(404, 409, 422),
 )
 async def create_member(
     community_key: str,
@@ -120,13 +161,23 @@ async def create_member(
 
     A concurrent create answers `409` too — the unique index refuses it, and the
     service translates that back into the same conflict.
+
+    An `active` member created with meters is `409 sensor_held` when another
+    active member, in any community, holds one of their sensors (REQ-0069).
+    An asset key longer than 128 characters is `422 asset_key_too_long`
+    (REQ-0028).
+
+    `role` and `status` outside their sets are `422 invalid_role` /
+    `invalid_status`, and an `area` that is not a key of the community's
+    areas is `422 unknown_area` (REQ-0066).
     """
     community, _ = await _resolve(session, community_key)
 
-    if payload.status not in MEMBER_STATUSES:
-        raise HTTPException(
-            422, f"status must be one of {', '.join(MEMBER_STATUSES)}"
-        )
+    await _check_member_values(
+        session,
+        community,
+        {"role": payload.role, "status": payload.status, "area": payload.area},
+    )
 
     member_in = payload.model_copy(update={"key": None})
     try:
@@ -134,7 +185,11 @@ async def create_member(
             session, community, member_in, key=payload.key
         )
     except member_service.MemberConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise RegistryError(409, str(exc), exc.code) from exc
+    except member_service.SensorHeld as exc:
+        raise _sensor_held(exc) from exc
+    except member_service.AssetKeyTooLong as exc:
+        raise _asset_key_too_long(exc) from exc
 
     await session.commit()
     await session.refresh(member)
@@ -148,6 +203,7 @@ async def create_member(
 @router.patch(
     "/communities/{community_key}/members/{member_key}",
     response_model=MemberDetail,
+    responses=error_responses(404, 409, 422),
 )
 async def patch_member(
     community_key: str,
@@ -177,14 +233,20 @@ async def patch_member(
     Re-sending a member the DID it already holds is a no-op success: onboarding
     writes it from a retriable step, so the same write arriving twice must not
     be a conflict.
+
+    Setting `status: active` on a member that was not active re-checks its
+    sensors, and the whole patch is refused `409 sensor_held` when another
+    active member holds one (REQ-0069).
+
+    `role` and `area` are still accepted here, for `members.write` holders,
+    and held to the same sets as on `PATCH …/profile`: `422 invalid_role`,
+    `invalid_status`, `unknown_area` (REQ-0066). A role change leaves the
+    member's assets as they are.
     """
     community, member = await _resolve(session, community_key, member_key)
 
     patch = payload.model_dump(exclude_unset=True)
-    if "status" in patch and patch["status"] not in MEMBER_STATUSES:
-        raise HTTPException(
-            422, f"status must be one of {', '.join(MEMBER_STATUSES)}"
-        )
+    await _check_member_values(session, community, patch)
 
     if "user_id" in patch and patch["user_id"]:
         clash = await session.scalar(
@@ -195,10 +257,11 @@ async def patch_member(
             )
         )
         if clash is not None:
-            raise HTTPException(
+            raise RegistryError(
                 409,
                 f"user_id {patch['user_id']!r} already belongs to member "
                 f"{clash.key!r}",
+                ErrorCode.USER_ID_TAKEN,
             )
 
     if "did" in patch and patch["did"]:
@@ -219,7 +282,14 @@ async def patch_member(
                 )
             else:
                 detail = f"did {patch['did']!r} already belongs to another member"
-            raise HTTPException(409, detail)
+            raise RegistryError(409, detail, ErrorCode.DID_TAKEN)
+
+    try:
+        await member_service.ensure_reactivation_allowed(
+            session, community, member, patch.get("status")
+        )
+    except member_service.SensorHeld as exc:
+        raise _sensor_held(exc) from exc
 
     await member_service.apply_member_patch(member, patch)
     try:
@@ -236,8 +306,47 @@ async def patch_member(
         )
         if conflict is None:
             raise
-        raise HTTPException(status_code=409, detail=str(conflict)) from exc
+        raise RegistryError(409, str(conflict), conflict.code) from exc
 
+    await session.refresh(member)
+    return _member_detail(member)
+
+
+@router.patch(
+    "/communities/{community_key}/members/{member_key}/profile",
+    response_model=MemberDetail,
+    responses=error_responses(404, 422),
+)
+async def patch_member_profile(
+    community_key: str,
+    member_key: str,
+    payload: MemberProfilePatch,
+    session: AsyncSession = Depends(get_session),
+):
+    """Correct a member's role and area, and nothing else (REQ-0070).
+
+    The body is `{role?, area?}`: at least one of the two, and no other key —
+    an empty body, an unknown key, `null`, or a key the general `PATCH`
+    accepts (`user_id`, `did`, `status`, `name`, `extra`) is `422` and changes
+    nothing. Absent fields are left alone.
+
+    Derives `members.profile.write` (REQ-0063), which
+    `rec-registry.members.profile.write`, `rec-registry.members.write` and
+    `rec-registry.admin` satisfy (REQ-0064): a community dashboard can be
+    given this and nothing more.
+
+    `role` outside its set is `422 invalid_role`; an `area` that is not a key
+    of the community's areas is `422 unknown_area` (REQ-0066). A role change
+    leaves the member's assets as they are; the member's status is not
+    looked at.
+    """
+    community, member = await _resolve(session, community_key, member_key)
+
+    patch = payload.model_dump(exclude_unset=True)
+    await _check_member_values(session, community, patch)
+
+    await member_service.apply_member_patch(member, patch)
+    await session.commit()
     await session.refresh(member)
     return _member_detail(member)
 
@@ -245,6 +354,7 @@ async def patch_member(
 @router.post(
     "/communities/{community_key}/members/{member_key}/status",
     response_model=MemberDetail,
+    responses=error_responses(404, 409, 422),
 )
 async def change_member_status(
     community_key: str,
@@ -257,13 +367,21 @@ async def change_member_status(
     Separate from `PATCH` because a status change is the transition an operator
     reasons about — and because it reads clearly in an audit log, which a
     generic field update does not.
-    """
-    _, member = await _resolve(session, community_key, member_key)
 
-    if payload.status not in MEMBER_STATUSES:
-        raise HTTPException(
-            422, f"status must be one of {', '.join(MEMBER_STATUSES)}"
+    A move to `active` re-checks the member's sensors: when another active
+    member took one meanwhile it answers `409 sensor_held` and the status is
+    left as it was (REQ-0069).
+    """
+    community, member = await _resolve(session, community_key, member_key)
+
+    _check_status(payload.status)
+
+    try:
+        await member_service.ensure_reactivation_allowed(
+            session, community, member, payload.status
         )
+    except member_service.SensorHeld as exc:
+        raise _sensor_held(exc) from exc
 
     member.status = payload.status
     if payload.reason:
@@ -277,6 +395,7 @@ async def change_member_status(
 @router.delete(
     "/communities/{community_key}/members/{member_key}",
     response_model=DeletionReport,
+    responses=error_responses(404),
 )
 async def delete_member(
     community_key: str,
@@ -342,6 +461,7 @@ async def delete_member(
 @router.put(
     "/communities/{community_key}/members/{member_key}/delivery-points/{point_id}",
     response_model=DeliveryPointsResponse,
+    responses=error_responses(404),
 )
 async def upsert_delivery_point(
     community_key: str,
@@ -377,6 +497,7 @@ async def upsert_delivery_point(
 @router.delete(
     "/communities/{community_key}/members/{member_key}/delivery-points/{point_id}",
     response_model=DeliveryPointsResponse,
+    responses=error_responses(404),
 )
 async def remove_delivery_point(
     community_key: str,
@@ -407,7 +528,9 @@ async def remove_delivery_point(
 
 @router.put(
     "/communities/{community_key}/members/{member_key}/assets/{asset_key}",
+    response_model=AssetDetail,
     status_code=200,
+    responses=error_responses(404, 409, 422),
 )
 async def upsert_asset(
     community_key: str,
@@ -426,6 +549,21 @@ async def upsert_asset(
     conflict: the service applies it to the row the other writer created and
     answers `200`, because a create-or-replace is idempotent and a race means
     only that the two arrived in an order neither cared about.
+
+    **A meter is attached here** — by convention at `meter-<sensor id>`, the id
+    trimmed (REQ-0071). The outcomes a caller tells apart by `code`:
+
+    * `200` — attached, or already attached to this member (a no-op replace);
+    * `409 sensor_held` — another active member, in any community, holds the
+      sensor (REQ-0069); a holder outside this community is not named;
+    * `409 asset_key_taken` — another member of this community holds the key
+      (with the convention: an inactive member still holding the asset).
+
+    The sensor id is stored trimmed; one blank after trimming is `422`. An
+    asset key longer than 128 characters is `422 asset_key_too_long` — with the
+    convention, a sensor id longer than 122 (REQ-0028).
+
+    Answers the stored asset.
     """
     community, member = await _resolve(session, community_key, member_key)
 
@@ -447,6 +585,13 @@ async def upsert_asset(
     except ValidationError as exc:
         raise HTTPException(422, f"Invalid {payload.asset_type} asset: {exc}") from exc
 
+    if payload.asset_type == "meter" and not member_service.normalise_sensor_id(
+        validated.sensor_id
+    ):
+        # A meter without a sensor id is unreachable rather than incomplete
+        # (REQ-0035); the bundle path skips one, a single write refuses it.
+        raise HTTPException(422, "Invalid meter asset: sensor_id is blank")
+
     try:
         asset = await member_service.upsert_asset(
             session,
@@ -457,26 +602,36 @@ async def upsert_asset(
             payload=validated,
         )
     except member_service.AssetKeyTaken as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise RegistryError(409, str(exc), ErrorCode.ASSET_KEY_TAKEN) from exc
+    except member_service.SensorHeld as exc:
+        raise _sensor_held(exc) from exc
+    except member_service.AssetKeyTooLong as exc:
+        raise _asset_key_too_long(exc) from exc
 
     await session.commit()
     await session.refresh(asset)
 
-    return {
-        "id": str(asset.id),
-        "key": asset.key,
-        "asset_type": asset.asset_type,
-        "name": asset.name,
-        "sensor_id": asset.sensor_id,
-        "properties": asset.properties or {},
-        "device": asset.device or {},
-        "relationships": asset.relationships or {},
-    }
+    return AssetDetail(
+        id=str(asset.id),
+        key=asset.key,
+        asset_type=asset.asset_type,
+        name=asset.name,
+        owner_key=member.key,
+        owner_user_id=member.user_id,
+        sensor_id=asset.sensor_id,
+        properties=asset.properties or {},
+        device=asset.device or {},
+        relationships=asset.relationships or {},
+        extra=asset.extra or {},
+        created_at=asset.created_at.isoformat() if asset.created_at else None,
+        updated_at=asset.updated_at.isoformat() if asset.updated_at else None,
+    )
 
 
 @router.delete(
     "/communities/{community_key}/members/{member_key}/assets/{asset_key}",
     status_code=204,
+    responses=error_responses(404),
 )
 async def delete_asset(
     community_key: str,
@@ -485,7 +640,12 @@ async def delete_asset(
     session: AsyncSession = Depends(get_session),
 ):
     """Remove one asset. Assets carry no history of their own, so this is a
-    real delete — unlike a member, whose removal would cascade."""
+    real delete — unlike a member, whose removal would cascade.
+
+    **This is how a meter is detached** (REQ-0071): a hard delete, after which
+    the sensor is free to be attached elsewhere. An asset the member does not
+    hold is `404 asset_not_found`.
+    """
     community, member = await _resolve(session, community_key, member_key)
 
     asset = await session.scalar(
@@ -496,7 +656,7 @@ async def delete_asset(
         )
     )
     if asset is None:
-        raise HTTPException(404, f"Asset {asset_key!r} not found")
+        raise RegistryError(404, f"Asset {asset_key!r} not found", ErrorCode.ASSET_NOT_FOUND)
 
     await session.delete(asset)
     await session.commit()
@@ -508,7 +668,11 @@ async def delete_asset(
 # =============================================================================
 
 
-@router.patch("/communities/{community_key}", response_model=CommunityDetail)
+@router.patch(
+    "/communities/{community_key}",
+    response_model=CommunityDetail,
+    responses=error_responses(404),
+)
 async def patch_community(
     community_key: str,
     payload: CommunityPatch,
@@ -547,6 +711,7 @@ async def patch_community(
 @router.put(
     "/communities/{community_key}/areas/{area_key}",
     response_model=CommunityDetail,
+    responses=error_responses(404),
 )
 async def upsert_area(
     community_key: str,
@@ -579,6 +744,7 @@ async def upsert_area(
 @router.delete(
     "/communities/{community_key}/areas/{area_key}",
     response_model=CommunityDetail,
+    responses=error_responses(404, 409),
 )
 async def delete_area(
     community_key: str,
@@ -592,6 +758,10 @@ async def delete_area(
     member who belongs to an area that does not exist.
     """
     community, _ = await _resolve(session, community_key)
+    # Exclusively, before counting: a member write moving somebody into this
+    # area holds the row shared until it commits, so the count below sees it
+    # (REQ-0066).
+    await member_service.lock_community(session, community, share=False)
 
     areas = community.areas or {}
     if area_key not in areas:
@@ -603,10 +773,11 @@ async def delete_area(
         .where(Member.community_id == community.id, Member.area == area_key)
     )
     if in_use:
-        raise HTTPException(
+        raise RegistryError(
             409,
             f"Area {area_key!r} is still referenced by {in_use} member(s); "
             "move them first",
+            ErrorCode.AREA_IN_USE,
         )
 
     community.areas = {k: v for k, v in areas.items() if k != area_key}

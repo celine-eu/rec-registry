@@ -12,7 +12,7 @@ Top-level entity representing a Renewable Energy Community.
 | `name` | `str` | Human-readable display name |
 | `description` | `str` | Optional free-text description |
 | `areas` | `JSONB` | Named areas, each with `name`, `topology` (list of node IDs), optional `location`/`geometry` |
-| `topology` | `JSONB` | Grid topology as a list of nodes (`id`, `type`, `name`, `operator_id`, children) |
+| `topology` | `JSONB` | Grid topology as a list of nodes (`id`, `type`, `name`, `operator_id`, `parent`, optional `area` geometry) |
 | `legal` | `JSONB` | Legal info: `name`, `vat`, `legal_form` |
 | `links` | `JSONB` | Public URLs: `website`, `logo`, `privacy_policy`, `terms` |
 | `contact` | `JSONB` | Contact info: `email`, `pec`, `phone` |
@@ -51,7 +51,7 @@ A physical or virtual energy asset associated with a member and community.
 | `key` | `str` | Unique asset identifier within the community |
 | `asset_type` | `str` | `pv`, `storage`, `meter`, `ev_charger`, `heat_pump`, or `load` |
 | `name` | `str` | Display name |
-| `sensor_id` | `str?` | Optional sensor/meter identifier (promoted column for lookups) |
+| `sensor_id` | `str?` | Optional sensor/meter identifier (promoted column for lookups); stored trimmed, and held by at most one `active` member across the registry (REQ-0069) |
 | `properties` | `JSONB` | Type-specific properties (e.g., `capacity_kwp` for PV, `meter_type`/`pod` for meters) |
 | `device` | `JSONB` | SAREF-inspired device specification: `manufacturer`, `model`, `serial_number`, `firmware_version`, `type` |
 | `relationships` | `JSONB` | Asset relationships: `measures` (list of asset keys), `paired_with` (asset key) |

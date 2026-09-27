@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from celine.rec_registry.core.errors import ErrorCode
 from celine.rec_registry.db.models import Asset, Community, Member
 from celine.rec_registry.schemas.bundle import (
     AssetCollectionIn,
@@ -48,26 +49,41 @@ from celine.rec_registry.schemas.bundle import (
 # bundle asset into a row, and an asset created through the API must be
 # indistinguishable from one that arrived in a bundle.
 from celine.rec_registry.services.importer import (
+    ASSET_KEY_MAX_LENGTH,
+    too_long_asset_keys,
     _create_assets,
     _extract_device,
     _extract_extra,
     _extract_properties,
     _extract_relationships,
 )
+from celine.rec_registry.services.sensors import (
+    ACTIVE,
+    SensorHeld,
+    ensure_sensors_free,
+    lock_member,
+    member_sensor_ids,
+    normalise_sensor_id,
+)
 
 __all__ = [
     "AssetKeyTaken",
+    "AssetKeyTooLong",
+    "CommunityNotFound",
     "MemberConflict",
     "MemberNotFound",
+    "SensorHeld",
     "apply_member_patch",
     "build_delivery_points",
     "build_member_extra",
     "create_assets_for_member",
     "create_member",
+    "ensure_reactivation_allowed",
     "member_conflict_from",
     "merge_delivery_point",
     "next_member_key",
     "remove_delivery_point",
+    "lock_community",
     "resolve_community",
     "resolve_member",
 ]
@@ -99,16 +115,43 @@ class MemberConflict(Exception):
     """This member's key, user_id or DID is already taken.
 
     The first two clash within the community; the DID clashes anywhere in the
-    registry.
+    registry. ``code`` says which (REQ-0073).
     """
+
+    def __init__(self, message: str, code: ErrorCode):
+        super().__init__(message)
+        self.code = code
 
 
 class MemberNotFound(Exception):
     """No such member in this community."""
 
+    code = ErrorCode.MEMBER_NOT_FOUND
+
+
+class CommunityNotFound(MemberNotFound):
+    """No such community. A ``MemberNotFound`` so existing handlers still catch it."""
+
+    code = ErrorCode.COMMUNITY_NOT_FOUND
+
 
 class AssetKeyTaken(Exception):
     """This asset key already belongs to another member of the community."""
+
+
+class AssetKeyTooLong(Exception):
+    """An asset key longer than the column holds (REQ-0028).
+
+    Refused before anything is written: the insert would fail on the column's
+    length and answer a `500` that tells the caller nothing. With the meter
+    convention ``meter-<sensor id>`` (REQ-0071) a long sensor id reaches this.
+    """
+
+    def __init__(self, asset_key: str):
+        super().__init__(
+            f"Asset key is {len(asset_key)} characters; at most "
+            f"{ASSET_KEY_MAX_LENGTH} are allowed"
+        )
 
 
 # The unique indexes behind the two application-level checks. Named rather than
@@ -140,17 +183,23 @@ def member_conflict_from(
     detail = str(getattr(exc, "orig", exc))
 
     if _MEMBER_KEY_CONSTRAINT in detail:
-        return MemberConflict(f"Member {key!r} already exists in this community")
+        return MemberConflict(
+            f"Member {key!r} already exists in this community",
+            ErrorCode.MEMBER_KEY_TAKEN,
+        )
     if _MEMBER_USER_ID_CONSTRAINT in detail:
         return MemberConflict(
-            f"A member with user_id {user_id!r} already exists in this community"
+            f"A member with user_id {user_id!r} already exists in this community",
+            ErrorCode.USER_ID_TAKEN,
         )
     if _MEMBER_DID_CONSTRAINT in detail:
         # Deliberately unlike the two above: it names no holder. This index is
         # global, so the member it collided with may be in a community the
         # caller was not addressing, and saying which member holds a DID would
         # answer a question about somebody else's community.
-        return MemberConflict(f"did {did!r} already belongs to another member")
+        return MemberConflict(
+            f"did {did!r} already belongs to another member", ErrorCode.DID_TAKEN
+        )
     return None
 
 
@@ -162,7 +211,7 @@ async def resolve_community(session: AsyncSession, community_key: str) -> Commun
         select(Community).where(Community.key == community_key)
     )
     if community is None:
-        raise MemberNotFound(f"Community {community_key!r} not found")
+        raise CommunityNotFound(f"Community {community_key!r} not found")
     return community
 
 
@@ -177,6 +226,31 @@ async def resolve_member(
     if member is None:
         raise MemberNotFound(f"Member {member_key!r} not found")
     return member
+
+
+async def lock_community(
+    session: AsyncSession, community: Community, *, share: bool
+) -> None:
+    """Lock the community's row and refresh ``community`` from it.
+
+    What keeps "a member's area is one of its community's" (REQ-0066) true
+    when an area is deleted at the same moment a member is moved into it. A
+    write that sets a member's area takes the lock ``share``d and reads the
+    areas after it; deleting an area takes it exclusively before counting the
+    members that reference it. Either the area delete commits first and the
+    member write then finds the area gone, or the member write commits first
+    and the delete then counts that member and answers ``409 area_in_use``.
+
+    Community row before member rows before sensor advisory locks — the order
+    every write here takes them in, so no two writers wait on each other in a
+    cycle (``sensors.lock_member``).
+    """
+    await session.execute(
+        select(Community)
+        .where(Community.id == community.id)
+        .with_for_update(read=share)
+        .execution_options(populate_existing=True)
+    )
 
 
 # ── key minting ───────────────────────────────────────────────────────────────
@@ -304,12 +378,37 @@ async def create_member(
     if key is None:
         key = next_member_key([m.key for m in existing])
     elif any(m.key == key for m in existing):
-        raise MemberConflict(f"Member {key!r} already exists in this community")
+        raise MemberConflict(
+            f"Member {key!r} already exists in this community",
+            ErrorCode.MEMBER_KEY_TAKEN,
+        )
 
     if any(m.user_id == member_in.user_id for m in existing):
         raise MemberConflict(
             f"A member with user_id {member_in.user_id!r} already exists in this "
-            "community"
+            "community",
+            ErrorCode.USER_ID_TAKEN,
+        )
+
+    # An active member created holding meters holds their sensors from the
+    # first moment, so it is checked like an attach (REQ-0069). Raises
+    # `SensorHeld` before anything is inserted; the lock is held until the
+    # caller's commit.
+    # Before anything is inserted, so a key the column cannot hold is a coded
+    # refusal rather than a failed insert.
+    too_long = too_long_asset_keys(member_in.assets)
+    if too_long:
+        raise AssetKeyTooLong(too_long[0])
+
+    if member_in.status == ACTIVE and member_in.assets:
+        await ensure_sensors_free(
+            session,
+            community_id=community.id,
+            member_id=None,
+            sensor_ids=(
+                normalise_sensor_id(m.sensor_id)
+                for m in (member_in.assets.meter or {}).values()
+            ),
         )
 
     member = Member(
@@ -347,6 +446,36 @@ async def create_member(
         await session.flush()
 
     return member, warnings
+
+
+async def ensure_reactivation_allowed(
+    session: AsyncSession, community: Community, member: Member, new_status: str | None
+) -> None:
+    """Refuse a move to ``active`` while another active member holds one of
+    this member's sensors (REQ-0069).
+
+    Only an active member holds a sensor, so a member that was not active held
+    nothing, and another member may have been given its meter meanwhile.
+    Reactivating it then would make two holders. Raises ``SensorHeld``; the
+    caller changes nothing. A member already active is not re-checked.
+
+    The member's row is locked first and its status and sensor ids read after
+    the lock, so an attach to this member running at the same moment is
+    either committed and among the ids checked, or waits and then sees the
+    member active and checks itself (``upsert_asset``). Must be called in the
+    transaction that then writes the status.
+    """
+    if new_status != ACTIVE:
+        return
+    await lock_member(session, member)
+    if member.status == ACTIVE:
+        return
+    await ensure_sensors_free(
+        session,
+        community_id=community.id,
+        member_id=member.id,
+        sensor_ids=await member_sensor_ids(session, member.id),
+    )
 
 
 async def apply_member_patch(
@@ -422,6 +551,38 @@ async def upsert_asset(
     The second is not only a race: two members using one key sequentially takes
     exactly the same path, and used to be a `500`.
     """
+    if len(asset_key) > ASSET_KEY_MAX_LENGTH:
+        raise AssetKeyTooLong(asset_key)
+
+    base_exclude = {"name", "relationships", "device"}
+    raw_sensor_id = getattr(payload, "sensor_id", None)
+    # Stored trimmed (REQ-0069). A meter's id blank after trimming is refused by
+    # the route before this is reached.
+    sensor_id = normalise_sensor_id(raw_sensor_id)
+    exclude = base_exclude | ({"sensor_id"} if raw_sensor_id is not None else set())
+
+    # Before the key: a sensor another active member holds is `sensor_held`
+    # whoever holds the key, and a key clash is only reached for a sensor
+    # nobody active holds — with `meter-<sensor id>` keys, an inactive member
+    # still holding the asset (REQ-0071). Only an active member holds, so a
+    # write to one that is not active is checked when it is reactivated.
+    #
+    # The member's row is locked, and its status re-read, before deciding: a
+    # reactivation of this member running at the same moment either committed
+    # first (the status now reads active and the sensor is checked here) or
+    # waits for this commit and then finds this sensor among the member's
+    # (`ensure_reactivation_allowed`). Without the lock each could miss the
+    # other's uncommitted half and leave two active holders.
+    if sensor_id is not None:
+        await lock_member(session, member)
+    if sensor_id is not None and member.status == ACTIVE:
+        await ensure_sensors_free(
+            session,
+            community_id=community.id,
+            member_id=member.id,
+            sensor_ids=[sensor_id],
+        )
+
     existing = await session.scalar(
         select(Asset).where(
             Asset.community_id == community.id,
@@ -429,10 +590,6 @@ async def upsert_asset(
             Asset.key == asset_key,
         )
     )
-
-    base_exclude = {"name", "relationships", "device"}
-    sensor_id = getattr(payload, "sensor_id", None)
-    exclude = base_exclude | ({"sensor_id"} if sensor_id is not None else set())
 
     fields = dict(
         asset_type=asset_type,

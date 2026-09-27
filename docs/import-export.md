@@ -37,10 +37,10 @@ community:
     northern:
       name: northern
       topology:
-        - "AC221E00020"
+        - "AC000E00000"
 
   topology:
-    - id: "PS-001"
+    - id: "AC000E00000"
       type: primary_substation
       name: "Primary Substation"
       operator_id: example-dso
@@ -174,6 +174,28 @@ whether to force.
 
 Creating a community that does not exist yet needs no `force`.
 
+### A bundle that breaks an invariant is refused
+
+An import is refused whole, before anything is deleted, when it would create
+rows the runtime writes refuse — `422` with the invariant's `code`, and a non-zero
+exit from the CLI. Today that is **`sensor_held`**: one sensor id, compared
+trimmed, held by two `active` members of the bundle, or by one of them and an
+active member of **another** community (REQ-0069). The report names this bundle's
+member and asset keys, never the other community or its member; the replaced
+community's own current rows do not count, since the import deletes them. An
+asset key over 128 characters is refused the same way, **`asset_key_too_long`**
+(REQ-0028), named by member key and length.
+
+A `dry_run` is not refused: its report lists every such refusal in `refusals`
+(`[{code, detail}]`). Sensor ids are stored trimmed, and one blank after trimming
+is skipped with a warning, like a missing one.
+
+To find sensors that were already held twice before this check existed:
+
+```bash
+celine-rec-registry duplicate-sensors   # read-only; exits 1 when any exist
+```
+
 ## Seeding versus changing
 
 A community is **seeded** from a bundle and **changes** through the member API
@@ -185,6 +207,15 @@ have diverged and a re-import will quietly revert live data.
 
 The practical rule: the file is a **seed**, `GET /admin/export` is a **backup**,
 and once members arrive at runtime the database is the source of truth.
+
+On a deployed realm a bundle carries a community's administrative data only, and
+members arrive through onboarding
+([ADR-0009](decisions/ADR-0009-a-community-is-retired-by-a-forced-empty-import.md)).
+**Planned:** areas take their source of truth from onboarding templates
+([ADR-0006](decisions/ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md)),
+and an import breaking the role, status, area or substation invariants is refused
+as one holding a sensor twice already is
+([REQ-0074](specifications/import-and-export.md)).
 
 ## Idempotency
 

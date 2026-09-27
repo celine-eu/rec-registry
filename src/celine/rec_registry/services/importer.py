@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from celine.rec_registry.core.errors import ErrorCode
+from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.versions import (
     CURRENT_SCHEMA_VERSION,
     KNOWN_SCHEMA_VERSIONS,
@@ -22,6 +24,27 @@ from celine.rec_registry.schemas.bundle import (
     RegistryBundleIn,
     AssetCollectionIn,
 )
+from celine.rec_registry.services.sensors import (
+    ACTIVE,
+    active_holders,
+    lock_sensors,
+    normalise_sensor_id,
+)
+
+#: The longest asset key ``asset.key`` holds. A longer one is refused with
+#: ``asset_key_too_long`` on every path that writes assets, rather than failing
+#: the insert with a `500` (REQ-0028).
+ASSET_KEY_MAX_LENGTH: int = Asset.__table__.c.key.type.length
+
+
+def too_long_asset_keys(assets: AssetCollectionIn | None) -> list[str]:
+    """Every asset key in ``assets`` longer than ``ASSET_KEY_MAX_LENGTH``, sorted."""
+    if assets is None:
+        return []
+    keys: list[str] = []
+    for asset_type in ("pv", "storage", "meter", "ev_charger", "heat_pump", "load"):
+        keys.extend(getattr(assets, asset_type, None) or {})
+    return sorted(k for k in keys if len(k) > ASSET_KEY_MAX_LENGTH)
 
 
 def schema_version_warnings(bundle: RegistryBundleIn) -> list[str]:
@@ -121,6 +144,117 @@ class ImportWouldOverwrite(Exception):
         )
 
 
+class ImportRefused(Exception):
+    """The bundle breaks an invariant every runtime write keeps (REQ-0074).
+
+    Refused whole, before anything is deleted or inserted: an import that only
+    warned would be the way to create exactly the rows the write API refuses
+    (ADR-0007). ``refusals`` lists every one found, as ``(code, detail)``.
+    """
+
+    def __init__(self, community_key: str, refusals: list[tuple[str, str]]):
+        self.community_key = community_key
+        self.refusals = refusals
+        self.code = refusals[0][0]
+        super().__init__(
+            f"Import of {community_key!r} refused: "
+            + "; ".join(detail for _, detail in refusals)
+        )
+
+
+def _active_meters(bundle: RegistryBundleIn) -> list[tuple[str, str, str]]:
+    """``(trimmed sensor id, member key, asset key)`` of every active member's
+    meter in the bundle. A meter blank after trimming is skipped here as the
+    import skips it (REQ-0035)."""
+    found: list[tuple[str, str, str]] = []
+    for member_key, member in bundle.members.items():
+        if member.status != ACTIVE or not member.assets:
+            continue
+        for asset_key, meter in (member.assets.meter or {}).items():
+            sensor_id = normalise_sensor_id(meter.sensor_id)
+            if sensor_id is not None:
+                found.append((sensor_id, member_key, asset_key))
+    return found
+
+
+async def import_refusals(
+    session: AsyncSession, bundle: RegistryBundleIn, *, lock: bool = False
+) -> list[tuple[str, str]]:
+    """Every invariant refusal this bundle would meet, as ``(code, detail)``.
+
+    A member whose ``role`` or ``status`` is outside its set, or whose
+    ``area`` is not a key of the bundle's ``community.areas``
+    (``invalid_role``, ``invalid_status``, ``unknown_area``; REQ-0066), named
+    by member key, field and value.
+
+    One sensor held twice (REQ-0069): by two active members of
+    the bundle, or by one of them and an active member of **another**
+    community. The replaced community's own current rows do not count — the
+    import deletes them. A sensor held elsewhere is reported by this bundle's
+    member and asset key, never by the other community or member.
+
+    Also an asset key longer than the column holds (``asset_key_too_long``,
+    REQ-0028), named by its member key and length — the key itself can embed a
+    sensor id.
+
+    Reports the ids by the keys that hold them and never by the id itself.
+    ``lock`` takes the advisory locks first, for a caller about to write.
+    """
+    refusals: list[tuple[str, str]] = []
+    area_keys = list(bundle.community.areas)
+    for member_key, member in sorted(bundle.members.items()):
+        for found in member_value_refusals(
+            role=member.role, status=member.status, area=member.area, areas=area_keys
+        ):
+            refusals.append((found.code.value, f"member {member_key!r}: {found.detail}"))
+    for member_key, member in sorted(bundle.members.items()):
+        for asset_key in too_long_asset_keys(member.assets):
+            refusals.append(
+                (
+                    ErrorCode.ASSET_KEY_TOO_LONG.value,
+                    f"member {member_key!r}: an asset key is {len(asset_key)} "
+                    f"characters; at most {ASSET_KEY_MAX_LENGTH} are allowed",
+                )
+            )
+
+    meters = _active_meters(bundle)
+    if not meters:
+        return refusals
+
+    holders: dict[str, list[tuple[str, str]]] = {}
+    for sensor_id, member_key, asset_key in meters:
+        holders.setdefault(sensor_id, []).append((member_key, asset_key))
+    for sensor_id in sorted(holders):
+        members = {m for m, _ in holders[sensor_id]}
+        if len(members) > 1:
+            named = ", ".join(
+                f"member {m!r} (asset {a!r})" for m, a in sorted(holders[sensor_id])
+            )
+            refusals.append(
+                (ErrorCode.SENSOR_HELD.value, f"one sensor is held by several active members: {named}")
+            )
+
+    if lock:
+        await lock_sensors(session, holders)
+    elsewhere = {
+        h.sensor_id
+        for h in await active_holders(
+            session, holders, exclude_community_key=bundle.community.id
+        )
+    }
+    for sensor_id, member_key, asset_key in sorted(meters, key=lambda m: (m[1], m[2])):
+        if sensor_id in elsewhere:
+            refusals.append(
+                (
+                    ErrorCode.SENSOR_HELD.value,
+                    f"member {member_key!r} (asset {asset_key!r}): the sensor is "
+                    "already held by an active member of another community",
+                )
+            )
+
+    return refusals
+
+
 async def replacement_import_bundle(
     session: AsyncSession,
     bundle: RegistryBundleIn,
@@ -142,6 +276,8 @@ async def replacement_import_bundle(
 
     Raises:
         ImportWouldOverwrite: the community exists and force was not set
+        ImportRefused: the bundle breaks an invariant (not raised on a dry run,
+            whose caller asks ``import_refusals`` for the report instead)
     """
     # Before the dry-run return below, deliberately: a dry run is where a caller
     # looks to find out whether the file is the one they think it is.
@@ -151,7 +287,7 @@ async def replacement_import_bundle(
     # Count what will be deleted
     deleted = {"community": 0, "member": 0, "asset": 0}
 
-    existing = await session.scalar(
+    query = (
         select(Community)
         .options(
             selectinload(Community.members),
@@ -159,6 +295,11 @@ async def replacement_import_bundle(
         )
         .where(Community.key == community_key)
     )
+    if not dry_run:
+        # The community's row first, as every write that locks it does
+        # (`members.lock_community`), then its members', then the sensors'.
+        query = query.with_for_update(of=Community)
+    existing = await session.scalar(query)
 
     if existing is not None:
         deleted["community"] = 1
@@ -172,9 +313,26 @@ async def replacement_import_bundle(
                 community_key, deleted["member"], deleted["asset"]
             )
 
-        if not dry_run:
-            await session.delete(existing)
-            await session.flush()
+    # Before anything is deleted: a refused import leaves the registry as it was.
+    if not dry_run:
+        if existing is not None:
+            # The replaced members' rows first, then the sensors' advisory locks:
+            # the order every write that locks both keeps (`sensors.lock_member`),
+            # so an attach to one of these members running at the same moment
+            # cannot hold its member while waiting for a sensor this import holds.
+            await session.execute(
+                select(Member.id)
+                .where(Member.community_id == existing.id)
+                .order_by(Member.id)
+                .with_for_update()
+            )
+        refusals = await import_refusals(session, bundle, lock=True)
+        if refusals:
+            raise ImportRefused(community_key, refusals)
+
+    if existing is not None and not dry_run:
+        await session.delete(existing)
+        await session.flush()
 
     # Count what will be inserted
     inserted = {"community": 1, "member": 0, "asset": 0}
@@ -376,7 +534,10 @@ async def _create_assets(
 
     # Meter assets
     for asset_key, meter in (assets.meter or {}).items():
-        if not meter.sensor_id:
+        # Stored trimmed, so ` SEN-1` and `SEN-1` are one sensor (REQ-0069);
+        # blank after trimming is missing.
+        sensor_id = normalise_sensor_id(meter.sensor_id)
+        if sensor_id is None:
             warnings.append(f"Meter {asset_key}: missing sensor_id; skipped")
             continue
 
@@ -386,7 +547,7 @@ async def _create_assets(
             key=asset_key,
             asset_type="meter",
             name=meter.name,
-            sensor_id=meter.sensor_id,
+            sensor_id=sensor_id,
             properties=_extract_properties(meter, base_exclude | {"sensor_id"}),
             device=_extract_device(meter),
             relationships=_extract_relationships(meter),

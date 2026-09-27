@@ -42,6 +42,11 @@ _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
+# The lookups that start from an identifier naming a person and answer what that
+# person holds. Matched as the whole route segment after `/admin/lookup/`, never
+# as a substring of the path.
+_PERSON_LOOKUPS = frozenset({"assets-by-user-ids", "members-by-dids"})
+
 
 def _wants_purge(query: str) -> bool:
     """Whether a delete asks for permanent erasure rather than deactivation.
@@ -188,8 +193,33 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         `rec-registry.admin` continues to satisfy all of these: the shared scope
         matcher treats `{service}.admin` as covering `{service}.*`, so nothing
         that works today stops working.
+
+        **Only the fixed segments of a route are read, each at its position**
+        (REQ-0065). Member keys, asset keys, delivery-point ids and area keys are
+        chosen by callers — an attached meter's key is `meter-<sensor id>`, and
+        the sensor id is whatever is printed on the device — so a derivation
+        that searched the whole path for a word would let an id containing
+        `lookup`, `import` or `export` choose the action, and a holder of that
+        grant would reach a write it was never given. A path matching no route
+        shape derives `admin`, which only `rec-registry.admin` satisfies: such a
+        request answers 404 or 405 anyway, and an unknown shape must not fall
+        through to a narrower grant by accident.
         """
-        if "lookup" in path:
+        segments = [s for s in path.split("/") if s]
+        if not segments or segments[0] != "admin":
+            return "admin"
+        rest = segments[1:]
+        if not rest:
+            return "admin"
+        head = rest[0]
+        method = method.upper()
+
+        if head == "lookup":
+            # Lookups are reads; the batch ones are POSTs because they carry a
+            # list, not because they change anything. Any other method on a
+            # lookup path is no route at all.
+            if method not in _READ_METHODS and method != "POST":
+                return "admin"
             # Resolving *what a named person owns* is a different disclosure
             # from resolving which community a user or sensor belongs to, so it
             # gets its own action name. Both are granted by `rec-registry.lookup`
@@ -203,30 +233,67 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             # community a sensor sits in. It belongs on the same action by that
             # reasoning, and would otherwise fall through to the broader
             # `lookup` by default rather than by decision.
-            if "assets-by-user-ids" in path or "members-by-dids" in path:
+            #
+            # The route name is the one segment after `lookup`; anything beyond
+            # it is a caller's id (`{user_id:path}` may itself hold slashes).
+            if len(rest) == 2 and rest[1] in _PERSON_LOOKUPS:
                 return "assets.lookup"
             return "lookup"
-        if "import" in path:
-            return "import"
-        if "export" in path:
-            return "export"
+
+        if head == "import":
+            if rest in (["import"], ["import", "yaml"]) and method == "POST":
+                return "import"
+            return "admin"
+
+        if head == "export":
+            if rest == ["export"] and method in _READ_METHODS:
+                return "export"
+            return "admin"
+
+        if head != "communities":
+            return "admin"
 
         if method in _READ_METHODS:
             return "read"
 
-        # Writes are named by what they touch. Assets is checked first because an
-        # asset path contains "/members" too.
-        if "/assets" in path:
-            return "assets.write"
-        if "/members" in path:
-            # Erasure is not deactivation. Deactivating a member is recoverable;
-            # purging them takes their assets with it and cannot be undone, so it
-            # is a grant an operator can withhold from a service that otherwise
-            # manages members.
-            if method == "DELETE" and _wants_purge(query):
-                return "members.purge"
-            return "members.write"
-        return "community.write"
+        # Writes are named by what they touch, read from the route's shape:
+        #   communities/{ck}                                   community.write
+        #   communities/{ck}/areas/{area}                      community.write
+        #   communities/{ck}/members                           members.write
+        #   communities/{ck}/members/{mk}                      members.write | .purge
+        #   communities/{ck}/members/{mk}/status               members.write
+        #   communities/{ck}/members/{mk}/profile  (PATCH)     members.profile.write
+        #   communities/{ck}/members/{mk}/delivery-points/{id} members.write
+        #   communities/{ck}/members/{mk}/assets/{ak}          assets.write
+        n = len(rest)
+        if n == 2 or (n == 4 and rest[2] == "areas"):
+            return "community.write"
+        if n >= 3 and rest[2] == "members":
+            if n == 3:
+                return "members.write"
+            if n == 4:
+                # Erasure is not deactivation. Deactivating a member is
+                # recoverable; purging them takes their assets with it and
+                # cannot be undone, so it is a grant an operator can withhold
+                # from a service that otherwise manages members.
+                if method == "DELETE" and _wants_purge(query):
+                    return "members.purge"
+                return "members.write"
+            if n == 5 and rest[4] == "status":
+                return "members.write"
+            if n == 5 and rest[4] == "profile":
+                # Role and area only (REQ-0063, REQ-0070): a narrower grant
+                # than `members.write`, which the policy also accepts for it
+                # (REQ-0064). The route is a PATCH; any other method on it is
+                # no route at all.
+                if method == "PATCH":
+                    return "members.profile.write"
+                return "admin"
+            if n == 6 and rest[4] == "delivery-points":
+                return "members.write"
+            if n == 6 and rest[4] == "assets":
+                return "assets.write"
+        return "admin"
 
     def _get_resource_id(self, path: str) -> str:
         """Extract resource identifier from path."""
