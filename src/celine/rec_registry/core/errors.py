@@ -43,6 +43,12 @@ class ErrorCode(StrEnum):
     INVALID_STATUS = "invalid_status"
     INVALID_ROLE = "invalid_role"
     UNKNOWN_AREA = "unknown_area"
+    INVALID_AREA_BOUNDARY = "invalid_area_boundary"
+    TOPOLOGY_NODE_IN_USE = "topology_node_in_use"
+    AREA_NOT_FOUND = "area_not_found"
+    AREA_KEY_TAKEN = "area_key_taken"
+    INVALID_AREA_KEY = "invalid_area_key"
+    NOT_A_MEMBER = "not_a_member"
 
 
 class ErrorResponse(BaseModel):

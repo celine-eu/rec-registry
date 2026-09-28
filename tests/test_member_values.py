@@ -32,6 +32,8 @@ from celine.rec_registry.core.member_values import (
 )
 from celine.rec_registry.core.middleware import PolicyMiddleware
 from celine.rec_registry.services import members as member_service
+from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION
+from tests.substations import substation_graph
 
 action = PolicyMiddleware._get_admin_action
 
@@ -63,7 +65,7 @@ def _bundle(key: str, members: dict | None = None, areas=("north", "south")) -> 
         "community": {
             "id": key,
             "name": "Example Community",
-            "areas": {a: {"name": a} for a in areas},
+            **substation_graph(*areas, spare=1),
         },
         "members": members or {},
     }
@@ -111,7 +113,11 @@ def _refusal(r, status: int, code: str) -> str:
 
 
 SCHEMA = (
-    Path(__file__).parent.parent / "schemas" / "community" / "v0.6" / "community.schema.json"
+    Path(__file__).parent.parent
+    / "schemas"
+    / "community"
+    / f"v{CURRENT_SCHEMA_VERSION}"
+    / "community.schema.json"
 )
 
 
@@ -957,6 +963,23 @@ class TestTheOpenApiDocument:
                 {"$ref": "#/components/schemas/HTTPValidationError"},
             ]
         }
+
+    def test_the_profile_body_does_not_advertise_null(self):
+        """Both fields are optional, but the route refuses `null` with a `422`,
+        so the published schema must not offer `null` to a generated client.
+
+        @verifies REQ-0070
+        """
+        from celine.rec_registry.main import create_app
+
+        doc = create_app().openapi()
+        body = doc["components"]["schemas"]["MemberProfilePatch"]
+        assert body.get("required", []) == []
+        for name in ("role", "area"):
+            prop = body["properties"][name]
+            assert "anyOf" not in prop, prop
+            assert prop["type"] == "string"
+            assert "default" not in prop
 
     def test_the_new_codes_are_in_the_enum(self):
         """@verifies REQ-0073"""

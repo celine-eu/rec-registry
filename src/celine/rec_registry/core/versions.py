@@ -17,10 +17,12 @@ is how `1.0` ended up in the `schema_version` slot:
 * ``version`` — the format of the *envelope*: that a manifest is a mapping with
   `community` and `members` in it. Currently `1.0`, and it has never moved.
 * ``schema_version`` — which schema under ``schemas/community/`` the *content*
-  conforms to. Currently `0.6`, and it has moved twice. `0.4` → `0.5` had real
-  removals: `area.location` and `topology[].dso` went, `community.operators`
+  conforms to. Currently `0.7`, and it has moved three times. `0.4` → `0.5` had
+  real removals: `area.location` and `topology[].dso` went, `community.operators`
   arrived. `0.5` → `0.6` is additive — `member.did` — so a `0.5` file is a valid
-  `0.6` one.
+  `0.6` one. `0.6` → `0.7` adds `area.boundary` and holds every area to one
+  primary substation (REQ-0067), so a `0.6` file with areas is not a valid `0.7`
+  one, and the import refuses it on content whatever it declares (REQ-0074).
 
 ## Why these are constants and not derived
 
@@ -54,13 +56,12 @@ DISTRIBUTION = "celine-rec-registry"
 MANIFEST_VERSION = "1.0"
 
 # The schema under `schemas/community/` this service reads and writes.
-CURRENT_SCHEMA_VERSION = "0.6"
+CURRENT_SCHEMA_VERSION = "0.7"
 
 # Every schema version published under `schemas/community/`. A bundle declaring
-# one of these is understood; anything else is imported anyway and warned about,
-# because refusing is what breaks restoring a backup, and a backup is restored
-# when something has already gone wrong.
-KNOWN_SCHEMA_VERSIONS = ("0.4", "0.5", "0.6")
+# one of these is understood; anything else is imported anyway and warned about.
+# The version is never what refuses a bundle: its content is (REQ-0074).
+KNOWN_SCHEMA_VERSIONS = ("0.4", "0.5", "0.6", "0.7")
 
 
 def api_version() -> str:

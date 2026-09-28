@@ -26,7 +26,11 @@ The counts are of the caller's own assets.
 
 ### REQ-0047 — a caller who is a member of nothing is answered, not refused
 
-`GET /user` answers `200` with `membership: null`. The other five routes answer `403`.
+`GET /user` answers `200` with `membership: null`. The other five routes answer `403` with the
+coded body `{"detail": "You are not a member of any community", "code": "not_a_member"}`
+(REQ-0073), so a client — `../dataset-api`'s self-service row filter, which reads that answer as
+"no rows" and every other registry failure as an error — tells it apart by `code` rather than by
+the sentence. The OpenAPI document declares the `403` as `ErrorResponse` on each of the five.
 
 The asymmetry is deliberate. `GET /user` is the route an onboarding application calls *to
 find out* whether somebody is a member yet, so it must be answerable before the answer is

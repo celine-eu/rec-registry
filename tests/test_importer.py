@@ -13,6 +13,7 @@ from celine.rec_registry.services.importer import (
     ImportWouldOverwrite,
     replacement_import_bundle,
 )
+from tests.substations import substation_graph
 
 
 @pytest.fixture
@@ -25,8 +26,7 @@ def minimal_bundle() -> RegistryBundleIn:
             "community": {
                 "id": "test-rec",
                 "name": "Test REC",
-                "areas": {"north": {"name": "North"}},
-                "topology": [],
+                **substation_graph("north"),
             },
             "members": {
                 "m-001": {
@@ -198,8 +198,7 @@ class TestWarnings:
                 "community": {
                     "id": "warn-rec",
                     "name": "Warn REC",
-                    "areas": {"north": {"name": "North"}},
-                    "topology": [],
+                    **substation_graph("north"),
                 },
                 "members": {
                     "m-bad": {

@@ -5,9 +5,10 @@ Pydantic response models for REC Registry API.
 from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
-from celine.rec_registry.schemas.bundle import MemberIn
+from celine.rec_registry.schemas.bundle import AreaBoundaryIn, MemberIn
 
 T = TypeVar("T")
 
@@ -42,17 +43,49 @@ class Location(BaseModel):
     lon: float
 
 
+class AreaBoundary(BaseModel):
+    """The primary-substation boundary an area references (REQ-0067)."""
+
+    source: str
+    id: str
+
+
 class Area(BaseModel):
     name: str
+    # One primary substation (REQ-0067). An area stored before the rule has no
+    # boundary, and may list any number of nodes; both are answered as stored.
+    boundary: AreaBoundary | None = None
+    topology: list[str] = Field(default_factory=list)
     location: Location | None = None
     geometry: dict[str, Any] | None = None  # GeoJSON geometry (Point, Polygon, MultiPolygon, …)
 
+    @field_validator("boundary", mode="before")
+    @classmethod
+    def _stored_boundary(cls, value: Any) -> Any:
+        # Before v0.7 an area's unknown keys were stored as given, so a row may
+        # hold a `boundary` that is not one. Answered as none rather than as a
+        # `500` on every read of the community.
+        if isinstance(value, dict) and all(
+            isinstance(value.get(k), str) for k in ("source", "id")
+        ):
+            return value
+        return None
+
 
 class TopologyNode(BaseModel):
+    """One grid topology node, named as the bundle names it (REQ-0072).
+
+    The fields are the bundle's `TopologyNodeIn` fields, under the same names:
+    `operator_id` (a key of the community's `operators`, since schema v0.5) and
+    `parent` (the id of the node above this one). Before 1.6.0 this model
+    answered `operator`, a v0.4 name nothing has stored since, so it was
+    always `null` while the stored `operator_id` was never returned.
+    """
+
     id: str
     type: str
     name: str | None = None
-    operator: str | None = None
+    operator_id: str | None = None
     parent: str | None = None
     area: dict[str, Any] = JsonField("TopologyNodeArea")
 
@@ -493,6 +526,11 @@ class MemberPatch(BaseModel):
     extra: dict[str, Any] | None = None
 
 
+def _no_default(schema: dict[str, Any]) -> None:
+    """Drop a `"default": null` that would contradict a non-nullable type."""
+    schema.pop("default", None)
+
+
 class MemberProfilePatch(BaseModel):
     """A member's role and area, and nothing else (REQ-0070).
 
@@ -508,12 +546,17 @@ class MemberProfilePatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
 
-    role: str | None = Field(
+    # Optional but never `null`: `SkipJsonSchema[None]` keeps `null` out of the
+    # published schema, since the validator below refuses it with a `422`.
+    role: str | SkipJsonSchema[None] = Field(
         default=None,
         description="One of consumer, prosumer, producer, operator, admin.",
+        json_schema_extra=_no_default,
     )
-    area: str | None = Field(
-        default=None, description="A key of the community's `areas`."
+    area: str | SkipJsonSchema[None] = Field(
+        default=None,
+        description="A key of the community's `areas`.",
+        json_schema_extra=_no_default,
     )
 
     @model_validator(mode="after")
@@ -559,13 +602,61 @@ class DeletionReport(BaseModel):
     assets_removed: int = 0
 
 
+def _no_default_area(schema: dict[str, Any]) -> None:
+    """Drop the `"default": null` of a field that is refused when absent."""
+    schema.pop("default", None)
+
+
 class AreaUpsert(BaseModel):
-    """Create or replace one area of a community."""
+    """Create or replace one area of a community.
+
+    One primary substation (REQ-0067): `boundary` references it and `topology`
+    lists exactly one node id, `boundary.id`, a `primary_substation` node of
+    the community's topology. Anything else — no boundary, a list of them or a
+    malformed one included — is `422 invalid_area_boundary`; `boundary`
+    accepts anything in the model only so that each of those is refused with
+    that code rather than as a validation error.
+    """
 
     name: str
+    boundary: AreaBoundaryIn | SkipJsonSchema[Any] = Field(
+        default=None,
+        union_mode="left_to_right",
+        description="The primary-substation boundary, `{source, id}`. Required.",
+        json_schema_extra=_no_default_area,
+    )
     location: Location | None = None
     geometry: dict[str, Any] | None = None
-    topology: list[str] = Field(default_factory=list)
+    topology: list[str] = Field(
+        default_factory=list,
+        description="Exactly one node id: `boundary.id`.",
+    )
+
+
+class AreaRename(BaseModel):
+    """Move an area to a new key, with its members (REQ-0079).
+
+    `new_key` only; any other key is `422`. A key that is not an area key —
+    letters, digits, `-` and `_`, starting with a letter or digit, at most 128
+    characters — is refused `422 invalid_area_key`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_key: str = Field(description="The key the area is moved to.")
+
+
+class AreaRenamed(BaseModel):
+    """What a rename did (REQ-0079): the two keys, how many members moved, and
+    the whole community after it, so the caller can see the others are still
+    there."""
+
+    old_key: str
+    new_key: str
+    members_moved: int = Field(
+        description="Members of the community, of any status, moved to `new_key`."
+    )
+    community: CommunityDetail
 
 
 class CommunityPatch(BaseModel):

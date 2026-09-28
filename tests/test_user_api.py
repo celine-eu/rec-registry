@@ -24,6 +24,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import identifies_as
+from tests.substations import substation_graph
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,7 +46,7 @@ async def _seed(client, key: str = "user-rec") -> str:
             "id": key,
             "name": "Self Service Community",
             "description": "A community",
-            "areas": {"north": {"name": "north"}},
+            **substation_graph("north"),
             "settings": {"timezone": "Europe/Rome", "currency": "EUR"},
         },
         "members": {
@@ -239,6 +240,63 @@ class TestMemberAndCommunity:
         r = await as_user(identifies_as("kc-stranger")).get(route)
 
         assert r.status_code == 403
+
+    @pytest.mark.parametrize(
+        "route",
+        [
+            "/user/member",
+            "/user/community",
+            "/user/assets",
+            "/user/assets/meter-1",
+            "/user/delivery-points",
+        ],
+    )
+    async def test_the_refusal_carries_the_code_not_a_member(
+        self, live_client, as_user, route
+    ):
+        """`{detail, code: not_a_member}`, the sentence unchanged, so a client
+        branches on the code (REQ-0073) — dataset-api reads it as "no rows".
+
+        @verifies REQ-0047
+        """
+        await _seed(live_client)
+
+        r = await as_user(identifies_as("kc-stranger")).get(route)
+
+        assert r.status_code == 403
+        assert r.json() == {
+            "detail": "You are not a member of any community",
+            "code": "not_a_member",
+        }
+
+    async def test_a_member_is_not_answered_with_the_code(self, live_client, as_user):
+        """The contrast: the same routes answer a member.
+
+        @verifies REQ-0047
+        """
+        await _seed(live_client)
+
+        for route in ("/user/member", "/user/community", "/user/assets", "/user/delivery-points"):
+            r = await as_user(identifies_as(ALICE)).get(route)
+            assert r.status_code == 200, (route, r.text)
+
+    def test_the_openapi_document_declares_the_coded_403(self):
+        """@verifies REQ-0047"""
+        from celine.rec_registry.main import create_app
+
+        paths = create_app().openapi()["paths"]
+        for route in (
+            "/user/member",
+            "/user/community",
+            "/user/assets",
+            "/user/assets/{asset_key}",
+            "/user/delivery-points",
+        ):
+            schema = paths[route]["get"]["responses"]["403"]["content"][
+                "application/json"
+            ]["schema"]
+            assert schema["$ref"].endswith("/ErrorResponse"), route
+        assert "403" not in paths["/user"]["get"]["responses"]
 
 
 @pytest.mark.integration

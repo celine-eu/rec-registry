@@ -79,8 +79,10 @@ write, lookup and self-service tests do not run:
 uv run pytest -q -m integration    # only those; TEST_DATABASE_URL overrides the connection
 ```
 
-Each run creates and drops a throwaway `rec_registry_test` schema, so it needs no
-`CREATE DATABASE` rights.
+Each run creates and drops throwaway schemas named for that run
+(`rec_registry_test_<random>`, and `rec_registry_migrations_<random>` for the migration
+test), so it needs no `CREATE DATABASE` rights and two runs can share one database. A run
+killed mid-way leaves its schemas behind, to be dropped by hand.
 
 A test declares which requirement it covers with a `@verifies REQ-####` tag in its
 docstring; see [the requirements](specifications/index.md) and, for the working procedure,
@@ -96,7 +98,7 @@ src/celine/rec_registry/
     session.py               # Async session management
   schemas/
     models.py                # Pydantic response schemas
-    bundle.py                # Bundle import schemas (v0.6)
+    bundle.py                # Bundle import schemas (v0.7)
   api/
     user.py                  # Self-service user endpoints
     meta.py                  # Health, version
@@ -107,12 +109,18 @@ src/celine/rec_registry/
       management.py          # Import/export operations
   services/
     members.py               # Row building, shared by the importer and the write API
+    sensors.py               # One active holder per sensor id (REQ-0069)
     importer.py              # Bundle import logic
     exporter.py              # YAML export logic
   core/
     settings.py              # Pydantic settings
     middleware.py             # Auth/policy middleware
     yaml_io.py               # YAML parsing utilities
+    area_boundary.py         # One area, one primary substation; area keys (REQ-0067)
+    errors.py                # Refusal codes, {detail, code} (REQ-0073)
+    member_values.py         # Role and status sets (REQ-0066)
+    sensor_id.py             # Sensor id trimming, shared with SQL
+    versions.py              # Schema and API versions, one copy
   cli/
     main.py                  # CLI entry point (celine-rec-registry)
     config.py                # CLI configuration

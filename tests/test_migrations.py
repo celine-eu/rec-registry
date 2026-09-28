@@ -42,7 +42,8 @@ from tests.conftest import PG_URL
 
 # Its own schema, not the one `pg_engine` builds: this test creates the schema
 # with the migrations rather than with `create_all`, and the two must not meet.
-SCHEMA = "rec_registry_migrations"
+# Named per run, like `pg_engine`'s, so two concurrent runs do not meet.
+SCHEMA = f"rec_registry_migrations_{__import__('uuid').uuid4().hex[:12]}"
 
 REPO_ROOT = __import__("pathlib").Path(__file__).parent.parent
 

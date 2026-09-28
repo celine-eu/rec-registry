@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from celine.rec_registry.core.area_boundary import (
+    area_boundary_refusals,
+    area_key_refusals,
+)
 from celine.rec_registry.core.errors import ErrorCode
 from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.versions import (
@@ -23,6 +27,7 @@ from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.schemas.bundle import (
     RegistryBundleIn,
     AssetCollectionIn,
+    TopologyNodeIn,
 )
 from celine.rec_registry.services.sensors import (
     ACTIVE,
@@ -193,6 +198,18 @@ async def import_refusals(
     import deletes them. A sensor held elsewhere is reported by this bundle's
     member and asset key, never by the other community or member.
 
+    An area that is not one primary substation — no boundary, not exactly one
+    topology node, a node that is not the boundary id or not a
+    ``primary_substation`` of the bundle's topology, two areas on one boundary
+    id (``invalid_area_boundary``, REQ-0067), named by area key. There is no
+    compatibility branch: a bundle written before schema v0.7 that has areas
+    carries no boundary, and is refused like any other (ADR-0007).
+
+    An area whose key is not an area key — letters, digits, ``-`` and ``_``,
+    starting with a letter or digit, at most 128 characters
+    (``invalid_area_key``, REQ-0067), named by area key; a member naming it is
+    not refused for that, the area is.
+
     Also an asset key longer than the column holds (``asset_key_too_long``,
     REQ-0028), named by its member key and length — the key itself can embed a
     sensor id.
@@ -207,6 +224,12 @@ async def import_refusals(
             role=member.role, status=member.status, area=member.area, areas=area_keys
         ):
             refusals.append((found.code.value, f"member {member_key!r}: {found.detail}"))
+    for detail in area_key_refusals(bundle.community.areas):
+        refusals.append((ErrorCode.INVALID_AREA_KEY.value, detail))
+    for detail in area_boundary_refusals(
+        bundle.community.areas, bundle.community.topology
+    ):
+        refusals.append((ErrorCode.INVALID_AREA_BOUNDARY.value, detail))
     for member_key, member in sorted(bundle.members.items()):
         for asset_key in too_long_asset_keys(member.assets):
             refusals.append(
@@ -352,6 +375,8 @@ async def replacement_import_bundle(
     areas_dict = {}
     for area_key, area in bundle.community.areas.items():
         area_dict: dict[str, Any] = {"name": area.name}
+        if area.boundary is not None:
+            area_dict["boundary"] = area.boundary.model_dump()
         if area.topology:
             area_dict["topology"] = list(area.topology)
         if area.location is not None:
@@ -359,23 +384,14 @@ async def replacement_import_bundle(
         if area.geometry is not None:
             area_dict["geometry"] = area.geometry
         # Preserve any extra metadata fields (e.g. cod_ac, rag_soc)
-        extra = _extract_extra(area, {"name", "topology", "location", "geometry"})
+        extra = _extract_extra(
+            area, {"name", "boundary", "topology", "location", "geometry"}
+        )
         area_dict.update(extra)
         areas_dict[area_key] = area_dict
 
     # Build topology list
-    topology_list = []
-    for node in bundle.community.topology:
-        node_dict = {"id": node.id, "type": node.type}
-        if node.name:
-            node_dict["name"] = node.name
-        if node.operator_id:
-            node_dict["operator_id"] = node.operator_id
-        if node.parent:
-            node_dict["parent"] = node.parent
-        if node.area:
-            node_dict["area"] = node.area
-        topology_list.append(node_dict)
+    topology_list = [build_topology_node(node) for node in bundle.community.topology]
 
     # Build operators dict (stored in extra — no dedicated DB column)
     operators_dict: dict[str, Any] = {}
@@ -465,6 +481,26 @@ async def replacement_import_bundle(
     await session.flush()
 
     return community_key, deleted, inserted, warnings
+
+
+def build_topology_node(node: TopologyNodeIn) -> dict[str, Any]:
+    """One topology node in the JSONB shape the community stores.
+
+    Shared by the import and the topology node ``PUT`` (REQ-0072), so a node
+    written either way is the same stored dict: ``id``, ``type``, and
+    ``name``, ``operator_id``, ``parent``, ``area`` when set. Other keys are
+    not stored.
+    """
+    node_dict: dict[str, Any] = {"id": node.id, "type": node.type}
+    if node.name:
+        node_dict["name"] = node.name
+    if node.operator_id:
+        node_dict["operator_id"] = node.operator_id
+    if node.parent:
+        node_dict["parent"] = node.parent
+    if node.area:
+        node_dict["area"] = node.area
+    return node_dict
 
 
 def _count_assets(assets: AssetCollectionIn) -> int:

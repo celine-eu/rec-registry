@@ -19,6 +19,7 @@ from celine.sdk.auth import JwtUser
 
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
+from celine.rec_registry.core.errors import ErrorCode, RegistryError, error_responses
 from celine.rec_registry.core.middleware import require_user
 from celine.rec_registry.schemas.models import (
     # User-specific models (no sensitive data leakage)
@@ -39,6 +40,18 @@ from celine.rec_registry.schemas.models import (
 )
 
 router = APIRouter(prefix="/user", tags=["me"])
+
+
+def _not_a_member() -> RegistryError:
+    """``403 not_a_member``: the caller's username names no member (REQ-0047).
+
+    Coded so a client — dataset-api's row filter among them — tells "this
+    person is not a member" from every other refusal by ``code`` rather than
+    by the sentence (REQ-0073).
+    """
+    return RegistryError(
+        403, "You are not a member of any community", ErrorCode.NOT_A_MEMBER
+    )
 
 
 @router.get(
@@ -106,6 +119,7 @@ async def get_me(
 
 @router.get(
     "/member",
+    responses=error_responses(403),
     response_model=UserMemberDetail,
 )
 async def get_my_member(
@@ -130,9 +144,7 @@ async def get_my_member(
     )
 
     if member is None:
-        raise HTTPException(
-            status_code=403, detail="You are not a member of any community"
-        )
+        raise _not_a_member()
 
     return UserMemberDetail(
         key=member.key,
@@ -150,6 +162,7 @@ async def get_my_member(
 
 @router.get(
     "/community",
+    responses=error_responses(403),
     response_model=UserCommunityDetail,
 )
 async def get_my_community(
@@ -169,9 +182,7 @@ async def get_my_community(
     row = result.first()
 
     if row is None:
-        raise HTTPException(
-            status_code=403, detail="You are not a member of any community"
-        )
+        raise _not_a_member()
 
     member, community = row
 
@@ -192,6 +203,7 @@ async def get_my_community(
 
 @router.get(
     "/assets",
+    responses=error_responses(403),
     response_model=UserAssetsResponse,
 )
 async def get_my_assets(
@@ -209,9 +221,7 @@ async def get_my_assets(
     )
 
     if member is None:
-        raise HTTPException(
-            status_code=403, detail="You are not a member of any community"
-        )
+        raise _not_a_member()
 
     query = select(Asset).where(Asset.owner_id == member.id)
     if asset_type:
@@ -237,6 +247,7 @@ async def get_my_assets(
 
 @router.get(
     "/assets/{asset_key}",
+    responses=error_responses(403),
     response_model=UserAssetDetail,
 )
 async def get_my_asset(
@@ -252,9 +263,7 @@ async def get_my_asset(
     )
 
     if member is None:
-        raise HTTPException(
-            status_code=403, detail="You are not a member of any community"
-        )
+        raise _not_a_member()
 
     asset = await session.scalar(
         select(Asset).where(Asset.owner_id == member.id, Asset.key == asset_key)
@@ -281,6 +290,7 @@ async def get_my_asset(
 
 @router.get(
     "/delivery-points",
+    responses=error_responses(403),
     response_model=UserDeliveryPointsResponse,
 )
 async def get_my_delivery_points(
@@ -295,9 +305,7 @@ async def get_my_delivery_points(
     )
 
     if member is None:
-        raise HTTPException(
-            status_code=403, detail="You are not a member of any community"
-        )
+        raise _not_a_member()
 
     items = [DeliveryPoint(**dp) for dp in (member.delivery_points or [])]
 

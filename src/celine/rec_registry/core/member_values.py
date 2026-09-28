@@ -1,6 +1,6 @@
 """A member's role and status are closed sets, and its area is one of its community's (REQ-0066).
 
-The sets are the ones the published JSON Schemas (v0.4–v0.6) and the platform
+The sets are the ones the published JSON Schemas (v0.4–v0.7) and the platform
 ontology (``celine:MemberRole``, ``celine:MemberStatus``) already declare;
 ``tests/test_member_values.py`` holds them to the schema in the repository.
 

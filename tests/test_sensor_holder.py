@@ -28,6 +28,7 @@ from celine.rec_registry.core.errors import ErrorCode
 from celine.rec_registry.schemas.bundle import MeterAssetIn
 from celine.rec_registry.services import members as member_service
 from celine.rec_registry.services.sensors import normalise_sensor_id
+from tests.substations import substation_graph
 
 pytestmark = pytest.mark.asyncio
 
@@ -79,7 +80,7 @@ def _bundle(key: str, members: dict | None = None) -> dict:
         "community": {
             "id": key,
             "name": "Example Community",
-            "areas": {"north": {"name": "north"}, "south": {"name": "south"}},
+            **substation_graph("north", "south"),
         },
         "members": members or {},
     }
@@ -1374,6 +1375,8 @@ class TestTheOpenApiDocumentsBoth422Bodies:
             (member, "patch"),
             (member + "/status", "post"),
             (member + "/assets/{asset_key}", "put"),
+            ("/admin/communities/{community_key}/areas/{area_key}", "put"),
+            ("/admin/communities/{community_key}/areas/{area_key}/rename", "post"),
         ]:
             response = doc["paths"][path][method]["responses"]["422"]
             schema = response["content"]["application/json"]["schema"]

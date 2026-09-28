@@ -18,14 +18,15 @@ than in a service with a user watching it: a wrong row here is wrong everywhere,
 nothing downstream can tell.
 
 Two of those consumers make it concrete. `../onboarding` **writes** members on approval,
-through SDK wrappers that are not in a published release yet. `../dataset-api` uses
+through the SDK's registry wrappers (`celine.sdk.rec_registry`). `../dataset-api` uses
 membership to decide access — so a member wrongly deactivated here is a member who cannot
 see their own data there, and the error surfaces three repositories away from its cause.
 
-Two more are about to write. The community dashboard's backend, `../celine-community`, will
-attach and detach meters and correct a member's role and area (REQ-0063, REQ-0066,
-REQ-0069 – REQ-0071), and `../onboarding` will write a community's areas and topology from its
-templates (REQ-0067, REQ-0072).
+Two more write. The community dashboard's backend, `../celine-community`, attaches and
+detaches meters and corrects a member's role and area (REQ-0063, REQ-0066,
+REQ-0069 – REQ-0071), and `../onboarding` writes a community's areas and topology from its
+templates through the area and topology node routes (REQ-0067, REQ-0072); the area rename
+route (REQ-0079) is the one its sync moves an area with members to a new key through.
 
 ## None of them describes a defect
 
@@ -101,16 +102,16 @@ reports planned requirements as unverified.
 |---|---|
 | REQ-0001 – REQ-0010, REQ-0063 – REQ-0065 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
 | REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069 | [the registry model](registry-model.md) — what a community, member and asset are |
-| REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073 | [member and community writes](member-writes.md) — how a community changes at runtime |
+| REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
 | REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
-| REQ-0054 – REQ-0058, REQ-0076 – REQ-0077 | [operability](operability.md) — the CLI, health, version |
+| REQ-0054 – REQ-0058, REQ-0076 – REQ-0078 | [operability](operability.md) — the CLI, health, version |
 
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
-same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 and REQ-0077.
+same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0079.
 
 ## What is not covered
 
@@ -146,12 +147,10 @@ part that belongs to it.
   `user_id` are covered (REQ-0022) — constraint, translation and test. No other overlapping
   write is. `asset` carries the same unique index on `(community_id, key)` and nothing
   translates it, so two callers creating one asset key at once still answer `500`; two
-  upserting an area resolve by last-writer-wins, unchecked. One sensor attached to
+  upserting one area key resolve by last-writer-wins. One sensor attached to
   two members at once is covered, serialised by an advisory lock (REQ-0069), and so is a
-  member moved into an area while it is deleted, serialised on the community's row
-  (REQ-0066). A planned
-  requirement adds one more race that must be covered when it lands: two areas written onto
-  one substation at once (REQ-0067).
+  member moved into an area while it is deleted, and two areas written onto one substation
+  at once, both serialised on the community's row (REQ-0066, REQ-0067).
 
 ## What is not here
 

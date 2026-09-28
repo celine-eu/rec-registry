@@ -1,12 +1,12 @@
 # Import & Export
 
-## Bundle Format (v0.6)
+## Bundle Format (v0.7)
 
 The registry uses a YAML/JSON bundle format for import and export. A bundle encodes a full community graph:
 
 ```yaml
 version: "1.0"
-schema_version: "0.6"
+schema_version: "0.7"
 
 community:
   id: example_rec
@@ -33,9 +33,14 @@ community:
       name: Example DSO
       country: IT
 
+  # One area is one primary substation: a boundary, and exactly one topology
+  # node — a primary_substation whose id is the boundary's (placeholder code).
   areas:
     northern:
       name: northern
+      boundary:
+        source: gse_cabine_primarie
+        id: "AC000E00000"
       topology:
         - "AC000E00000"
 
@@ -78,12 +83,21 @@ Key differences from v0.4:
 - `members` is a dict keyed by member key (not a list)
 - Assets are nested under members as typed dicts (`assets.pv`, `assets.meter`, `assets.storage`, etc.)
 - Community has `areas`, `topology`, `legal`, `links`, `contact`, `settings`, `operators`
-- Schema version is `"0.6"` with bundle version `"1.0"`
+- Schema version is `"0.7"` with bundle version `"1.0"`
 
-v0.6 adds `member.did` and changes nothing else, so a v0.5 file is a valid v0.6 one. See
-[`schemas/community/v0.6/README.md`](../schemas/community/v0.6/README.md) for the field, and
-note that import reports an unmatched `schema_version` rather than refusing it — restoring a
-backup is the path a refusal would break.
+v0.7 makes every area one GSE primary substation: `boundary: {source: gse_cabine_primarie,
+id: <cod_ac>}`, required, and a `topology` of exactly one node id — `boundary.id`, which names
+a `primary_substation` node of `community.topology`. No two areas of one community carry the
+same `boundary.id`. See [`schemas/community/v0.7/README.md`](../schemas/community/v0.7/README.md).
+The registry stores the reference, never a shape, and does not check the code against the GSE
+dataset.
+
+v0.6 added `member.did` and changed nothing else, so a v0.5 file is a valid v0.6 one. **A v0.6
+file with areas is not a valid v0.7 one**, and the import refuses it — not for the version it
+declares, which only draws a warning, but for its content: none of its areas carries a
+boundary. A v0.6 file whose areas already keep the rule, or that has none, imports with the
+warning. There is no compatibility branch: an old backup is reshaped outside the product before
+it restores.
 
 ## Import
 
@@ -184,16 +198,29 @@ active member of **another** community (REQ-0069). The report names this bundle'
 member and asset keys, never the other community or its member; the replaced
 community's own current rows do not count, since the import deletes them. An
 asset key over 128 characters is refused the same way, **`asset_key_too_long`**
-(REQ-0028), named by member key and length.
+(REQ-0028), named by member key and length. So is a member whose `role` or
+`status` is outside its set, or whose `area` is not a key of the bundle's own
+`community.areas` — **`invalid_role`**, **`invalid_status`**, **`unknown_area`**
+(REQ-0066), named by member key, field and value. So is an area that is not one
+primary substation — no boundary, not exactly one topology node, a node that is
+not the boundary id, not in the bundle's `community.topology` or not a
+`primary_substation`, or a boundary id two areas share —
+**`invalid_area_boundary`** (REQ-0067), named by area key. So is an area whose key
+is not an area key — letters, digits, `-` and `_`, starting with a letter or
+digit, at most 128 characters — **`invalid_area_key`** (REQ-0067), named by that
+key; a member naming it is not refused for it.
 
 A `dry_run` is not refused: its report lists every such refusal in `refusals`
 (`[{code, detail}]`). Sensor ids are stored trimmed, and one blank after trimming
 is skipped with a warning, like a missing one.
 
-To find sensors that were already held twice before this check existed:
+To find rows written before these checks existed — which a re-import of their
+community would now be refused on:
 
 ```bash
-celine-rec-registry duplicate-sensors   # read-only; exits 1 when any exist
+celine-rec-registry duplicate-sensors   # sensors held twice; read-only; exits 1 when any exist
+celine-rec-registry out-of-set-values   # role, status or area out of set; read-only; exits 1 when any exist
+celine-rec-registry invalid-area-boundaries  # areas breaking the one-substation rule or the area-key rule; read-only; exits 1 when any exist
 ```
 
 ## Seeding versus changing
@@ -211,14 +238,66 @@ and once members arrive at runtime the database is the source of truth.
 On a deployed realm a bundle carries a community's administrative data only, and
 members arrive through onboarding
 ([ADR-0009](decisions/ADR-0009-a-community-is-retired-by-a-forced-empty-import.md)).
-**Planned:** areas take their source of truth from onboarding templates
-([ADR-0006](decisions/ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md)),
-and an import breaking the role, status, area or substation invariants is refused
-as one holding a sensor twice already is
+An import breaking the substation invariant is refused as one holding a sensor
+twice, or carrying a role, status or area out of set, is
 ([REQ-0074](specifications/import-and-export.md)).
+Areas take their source of truth from onboarding templates
+([ADR-0006](decisions/ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md)):
+onboarding writes them one at a time through the topology node and area routes
+(REQ-0072, REQ-0067), and `invalid-area-boundaries` lists what an import left
+breaking the rule.
+
+**Retiring a community** is a forced import of a bundle naming it with no members
+(REQ-0075): every member and asset goes, the community stays (by key, written anew)
+with the bundle's metadata, and every sensor it held can be attached elsewhere.
 
 ## Idempotency
 
 Import is idempotent: importing the same bundle twice produces the same state
 (with `force`, since the second run is by definition a replacement). Use exports
 as authoritative backups and re-import to restore.
+
+## Before deploying 1.6.0
+
+1.6.0 adds no migration and rewrites no stored row: a community written before it
+reads back as stored, and a runtime write judges only what it writes. What changes
+is what an import accepts — and an import is how a backup is restored. On 1.6.0 an
+import or restore is refused whole, before anything is deleted, unless every area
+is one primary substation under an area key, no sensor is held by two active
+members, and every role, status and area is in set
+([above](#a-bundle-that-breaks-an-invariant-is-refused)). A v0.6 backup with areas
+is refused on its content, since none of its areas carries a boundary.
+
+**So an existing community is reshaped before its first import or restore on
+1.6.0** — the forced empty import that retires it included: that bundle carries no
+areas, or areas that keep the rule. Per deployment:
+
+1. Export every community (`GET /admin/export`): the backup from before the upgrade.
+2. Run the three reports. They read nothing but `GET /admin/export` and write
+   nothing, so a 1.6.0 checkout can run them against the registry before it is
+   upgraded:
+
+   ```bash
+   celine-rec-registry duplicate-sensors
+   celine-rec-registry out-of-set-values
+   celine-rec-registry invalid-area-boundaries
+   ```
+
+3. Reshape, outside the product, what they list. On the live registry, after the
+   upgrade: a community's areas are rewritten from its onboarding template by
+   onboarding's registry sync (each node, then the area onto it; an area the
+   template names under another key is renamed with its members); a key that is
+   not an area key is moved by the area rename; a sensor held twice is detached
+   from one member, and a role, status or area out of set is corrected, through the
+   member routes. A backup that is to be restored is edited to schema v0.7 by hand.
+   A dry run of the reshaped bundle (`dry_run` on `POST /admin/import` or
+   `/admin/import/yaml`) refuses nothing and lists in its report's `refusals`
+   whatever still breaks a rule; the CLI's `import --dry-run` prints the counts
+   and warnings, not the refusals.
+4. Make sure every area an onboarding template registers members into is a key of
+   that registry community's `areas`, by running its registry sync right after the
+   upgrade: from 1.6.0 a member write naming any other area is `422 unknown_area`,
+   and every approval into it would fail.
+
+The clients that need 1.6.0 — the community dashboard's meter and profile writes,
+onboarding's registry sync — are deployed after it.

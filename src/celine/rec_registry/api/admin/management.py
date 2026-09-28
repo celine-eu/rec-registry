@@ -67,8 +67,14 @@ async def admin_import(
     deleted: `422` with the invariant's `code` — `sensor_held`, one sensor held
     by two active members of the bundle, or by one of them and an active member
     of another community (REQ-0069); `asset_key_too_long`, an asset key over
-    128 characters (REQ-0028). A dry run lists every such refusal in
-    `refusals` instead. A body that fails validation is a `422` too, with
+    128 characters (REQ-0028); `invalid_role`, `invalid_status`,
+    `unknown_area`, a member whose role or status is outside its set or whose
+    area is not a key of the bundle's `community.areas` (REQ-0066);
+    `invalid_area_boundary`, an area that is not one primary substation — one
+    boundary, one `primary_substation` topology node with the boundary's id,
+    no two areas on one boundary id (REQ-0067); a bundle written before schema
+    v0.7 that has areas is refused so. A dry run
+    lists every such refusal in `refusals` instead. A body that fails validation is a `422` too, with
     FastAPI's list `detail`; the OpenAPI document declares both bodies.
     """
     refusals: list[ImportRefusal] = []

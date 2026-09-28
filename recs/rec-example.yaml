@@ -1,5 +1,5 @@
 version: "1.0"
-schema_version: "0.6"
+schema_version: "0.7"
 
 metadata:
   created: "2024-01-15"
@@ -37,33 +37,41 @@ community:
       name: Example Distribution Network Operator
       country: IT
 
+  # One area is one GSE primary substation (schema v0.7): a boundary, and
+  # exactly one topology node, a primary_substation with the boundary's id.
+  # The codes are placeholders, not real substations.
   areas:
     northern:
       name: northern
+      boundary:
+        source: gse_cabine_primarie
+        id: "AC000E00001"
       topology:
-        - "AC001E00001"
+        - "AC000E00001"
 
     southern:
       name: southern
+      boundary:
+        source: gse_cabine_primarie
+        id: "AC000E00002"
       topology:
-        - "AC001E00002"
+        - "AC000E00002"
 
   topology:
-    - id: "PS-001"
+    - id: "AC000E00001"
       type: primary_substation
-      name: "Primary Substation 001"
+      name: "Primary Substation northern"
       operator_id: example-dso
 
-    - id: "AC001E00001"
-      type: secondary_substation
-      name: "Secondary Substation northern"
-      parent: "PS-001"
+    - id: "AC000E00002"
+      type: primary_substation
+      name: "Primary Substation southern"
       operator_id: example-dso
 
-    - id: "AC001E00002"
+    - id: "SS-001"
       type: secondary_substation
-      name: "Secondary Substation southern"
-      parent: "PS-001"
+      name: "Secondary Substation 001"
+      parent: "AC000E00001"
       operator_id: example-dso
 
 members:

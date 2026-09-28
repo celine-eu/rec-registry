@@ -23,6 +23,7 @@ checked either.
 from __future__ import annotations
 
 import pytest
+from tests.substations import substation_graph
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,7 +46,7 @@ async def _seed(client, key: str = "lookup-rec") -> str:
         "community": {
             "id": key,
             "name": "Lookup Community",
-            "areas": {"north": {"name": "north"}},
+            **substation_graph("north"),
         },
         "members": {
             "lk-00001": {

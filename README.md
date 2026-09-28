@@ -4,13 +4,13 @@ API for modelling Renewable Energy Communities (RECs). Manages communities, memb
 
 ## Features
 
-- Multi-community support with v0.6 schema
+- Multi-community support with v0.7 schema (each area one GSE primary substation)
 - Self-service user API (profile, membership, assets, delivery points)
 - Admin API for community management, cross-community lookup, and batch operations
 - **Runtime member management** — create, update, deactivate members and their delivery points and assets, one at a time
 - YAML-based import/export with full replace semantics, guarded so a restore cannot silently delete a live community
 - In-process OPA policy evaluation for authorization
-- CLI (`celine-rec-registry`) for import, export, listing, and lookup operations
+- CLI (`celine-rec-registry`) for import, export, listing, and lookup operations, and read-only reports of stored rows the write checks would now refuse
 - Paginated responses with cursor-based navigation
 
 ## Two ways a community changes
@@ -48,7 +48,11 @@ task run
 | `GET /admin/lookup/*` | Cross-community lookups by user ID, sensor ID, or delivery point |
 | `POST /admin/communities/{key}/members` | Create a member; sub-resources for its delivery points and assets |
 | `PUT\|DELETE /admin/communities/{key}/members/{member}/assets/meter-{sensor_id}` | Attach or detach a meter; one active holder per sensor id (`409 sensor_held`) |
+| `PATCH /admin/communities/{key}/members/{member}/profile` | Correct a member's role and area, nothing else (`members.profile.write`) |
 | `PATCH /admin/communities/{key}` | Update community metadata (areas have their own route) |
+| `PUT\|DELETE /admin/communities/{key}/areas/{area}` | Add, replace or remove one area; an area is one GSE primary substation (`422 invalid_area_boundary`) under an area key (`422 invalid_area_key`) |
+| `POST /admin/communities/{key}/areas/{area}/rename` | Move an area to a new key with its members, in one write (`community.write`) |
+| `PUT\|DELETE /admin/communities/{key}/topology/{node}` | Add, replace or remove one topology node; a node an area lists or another node names as `parent` is not deleted (`409 topology_node_in_use`) |
 | `POST /admin/import` | Import community from JSON bundle (**destructive**) |
 | `POST /admin/import/yaml` | Import communities from YAML multidocument (**destructive**) |
 | `GET /admin/export` | Export communities as YAML |
@@ -66,6 +70,8 @@ celine-rec-registry tree --community example_rec
 celine-rec-registry lookup-user --user-id <id>
 celine-rec-registry lookup-sensor --sensor-id <id>
 celine-rec-registry duplicate-sensors                              # read-only; exits 1 if a sensor has two active holders
+celine-rec-registry out-of-set-values                              # read-only; exits 1 if a role, status or area is out of set
+celine-rec-registry invalid-area-boundaries                        # read-only; exits 1 if a stored area breaks the one-substation or area-key rule
 ```
 
 A refusal a caller acts on answers `{"detail": "<sentence>", "code": "<code>"}` —
@@ -75,11 +81,11 @@ see [refusal codes](docs/api-reference.md#refusal-codes).
 
 | Document | Description |
 |---|---|
-| [Requirements](docs/specifications/index.md) | What the service must do — 76 requirements: 67 named by a test, 9 planned |
+| [Requirements](docs/specifications/index.md) | What the service must do — 79 requirements, every one named by a test, none planned |
 | [Decisions](docs/decisions/index.md) | Why a technical choice was made |
 | [Data Model](docs/data-model.md) | Community, Member, Asset schema; JSONB fields; relationships |
 | [API Reference](docs/api-reference.md) | All endpoint groups, query params, responses |
-| [Import & Export](docs/import-export.md) | Bundle format, replace semantics, the `force` guard, CLI usage |
+| [Import & Export](docs/import-export.md) | Bundle format, replace semantics, the `force` guard, CLI usage, [before deploying 1.6.0](docs/import-export.md#before-deploying-160) |
 | [AGENTS.md](AGENTS.md) | Operational setup: invariants, authorization model, the two write paths |
 | [Development](docs/development.md) | Setup, configuration, migrations, project layout |
 

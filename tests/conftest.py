@@ -6,6 +6,7 @@ os.environ.setdefault("AUTH_ENABLED", "false")
 os.environ.setdefault("POLICIES_ENABLED", "false")
 
 import pathlib
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -90,7 +91,10 @@ def pg_url() -> str:
     return PG_URL
 
 
-SCHEMA = "rec_registry_test"
+# Named per run, so two runs sharing one PostgreSQL (two agents, or a developer
+# and CI) never drop or build each other's tables (tests/test_suite_isolation.py).
+# A run killed mid-way leaves its schema behind; `DROP SCHEMA` it by hand.
+SCHEMA = f"rec_registry_test_{uuid.uuid4().hex[:12]}"
 
 
 @pytest.fixture
@@ -209,12 +213,16 @@ def as_user(pg_engine):
     from celine.sdk.auth import JwtUser
 
     from celine.rec_registry.api.user import router as user_router
+    from celine.rec_registry.core.errors import install_error_handlers
     from celine.rec_registry.core.middleware import require_user
 
     maker = async_sessionmaker(pg_engine, expire_on_commit=False)
 
     def build(user: JwtUser) -> httpx.AsyncClient:
         app = FastAPI()
+        # As `create_app` does, so a coded refusal (`not_a_member`) arrives
+        # with its code (REQ-0073).
+        install_error_handlers(app)
         app.include_router(user_router)
 
         async def override_session():

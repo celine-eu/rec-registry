@@ -103,6 +103,23 @@ and a re-import of their community is refused (REQ-0074). This is the report REQ
 run before the check is relied on; it judges with the same function the writes do, so the two
 cannot disagree about what is out of set. It issues one `GET` and no other request.
 
+### REQ-0078 — the CLI reports stored areas that break the one-substation rule, and writes nothing
+
+`celine-rec-registry invalid-area-boundaries` reads every community through `GET /admin/export`
+and prints one line per broken rule: the community key and the refusal sentence REQ-0067's
+check produces, which names the area keys and the rule — never a boundary or node id. Every
+area of each community is judged against that community's own `topology`, with the function
+the area `PUT`, the topology node `PUT` and the import use (`area_boundary_refusals`), so the
+report and the check cannot disagree. An area whose key is not an area key (REQ-0067) is listed
+too, one line per key before the community's boundary lines, with the function the import uses
+(`area_key_refusals`). It exits `0` when there are none, `1` when there are, and `2` when the
+registry cannot be read. It issues one `GET` and no other request.
+
+The writes refuse such areas from REQ-0067 on, but areas stored before it are not re-judged by
+a write to a sibling, and a re-import of their community is refused (REQ-0074). This is the
+report to run before a deployment relies on the rule — then an onboarding template sync, an
+area rename (REQ-0079) for a key, or a reshaped bundle, corrects what it lists.
+
 ---
 
 ## What is not verified here

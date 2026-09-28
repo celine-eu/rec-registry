@@ -47,3 +47,4 @@ edited to say something else.
 | [ADR-0007](ADR-0007-import-refuses-a-bundle-that-breaks-an-invariant.md) | import refuses a bundle that breaks an invariant, and old backups are reshaped rather than tolerated |
 | [ADR-0008](ADR-0008-a-refusal-carries-a-machine-readable-code.md) | a refusal carries a machine-readable code beside its message |
 | [ADR-0009](ADR-0009-a-community-is-retired-by-a-forced-empty-import.md) | a community is retired by a forced import with no members, and members arrive only through onboarding |
+| [ADR-0010](ADR-0010-an-area-is-renamed-with-its-members-in-one-write.md) | an area is renamed with its members in one write, under the community's lock |

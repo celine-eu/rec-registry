@@ -178,13 +178,13 @@ generated client has its type.
 and `settings`, merging `extra`. It does not touch `areas` or `topology`, for the same reason
 delivery points are absent from the member patch — they are collections with their own
 identity, and a patch omitting one would read as emptying it. Areas have their own route,
-below; **topology has none today**, and changes only through a bundle import.
-
-**Planned:** topology gains node routes (REQ-0072). The community `PATCH` stays outside the
-area invariant of REQ-0067, because it never touches either collection.
+below, and topology its node routes (REQ-0072). The community `PATCH` stays outside the area
+invariant of REQ-0067, because it never touches either collection.
 
 `PUT …/areas/{key}` adds or replaces one area and returns the whole community, so the
-caller can see the others are still there.
+caller can see the others are still there. The area it writes is one primary substation, or
+the write is refused `422` `invalid_area_boundary`, and its key is an area key, or the write is
+refused `422` `invalid_area_key` (REQ-0067).
 
 ### REQ-0030 — an area still referenced by a member cannot be deleted
 
@@ -221,10 +221,14 @@ it, and one that is missing from it is a write nobody has checked for the single
 write API guarantees.
 
 Attaching and detaching a meter (REQ-0071), a refused `sensor_held` attach, a
-reactivation, and the profile route (REQ-0070) — accepted and refused — are in it.
-
-**Planned:** the topology node `PUT` and `DELETE` (REQ-0072) join that registry in the change
-that adds them.
+reactivation, the profile route (REQ-0070) — accepted and refused — the area `PUT`,
+accepted and refused `invalid_area_boundary` and `invalid_area_key` (REQ-0067), and the topology node `PUT` and
+`DELETE` (REQ-0072) — a new node, a replaced one, a refused type change and a refused
+`topology_node_in_use` delete — of a node an area lists, and of a node another node names as
+its `parent` — and accepted deletes — are in it, and so is the area rename (REQ-0079),
+accepted and refused `area_key_taken`, `area_not_found` and `invalid_area_key`. For the
+topology writes the test also counts the community's nodes: a node write keeps every other
+node; for the renames it compares the areas: a rename changes one key and nothing else.
 
 ### REQ-0060 — the dataspace DID is written by `PATCH`, and a clash names its holder only within the community
 
@@ -318,16 +322,30 @@ job of dated holdings, a recorded follow-up and not this requirement. Decided in
 
 ### REQ-0072 — topology nodes are written one at a time, merging by id
 
-**Status:** planned
-
 `PUT /admin/communities/{ck}/topology/{node_id}` adds or replaces exactly one node, keeping the
-others; re-sending an existing id replaces that node rather than duplicating it. The `id` in
-the body must match the one in the path, or `422`. `DELETE` removes one node and keeps the rest;
-a node the community does not have is `404`; a node an area still references is refused with
-`409` `topology_node_in_use`, naming the areas. Both derive `community.write` (REQ-0004).
+others; re-sending an existing id replaces that node where it stands rather than duplicating
+it, and a new id is appended. The `id` in the body must match the one in the path, or `422`.
+`DELETE` removes one node and keeps the rest; a node the community does not have is `404`; a
+node an area still references — any area, whether or not it keeps REQ-0067 — is refused with
+`409` `topology_node_in_use`, naming the areas; so is a node another node names as its
+`parent`, naming those nodes by id only, so they are re-parented or deleted first (a node
+naming itself does not hold itself). Both derive `community.write` (REQ-0004) and
+answer the whole community, as the area routes do.
 
-Both are checked against REQ-0067: a `PUT` changing the `type` of a node an area references
-away from `primary_substation` answers `422` `invalid_area_boundary`.
+**The body is the bundle's topology node** (`TopologyNodeIn`): `id`, `type`, and optionally
+`name`, `operator_id`, `parent`, `area`. Every read answers a node under those same names
+(`TopologyNode`): before 1.6.0 reads answered `operator`, a schema v0.4 name nothing had stored
+since v0.5, so it was always `null` and the stored `operator_id` was never returned. Keys beyond
+these are accepted and not stored, as on the import, which builds a node with the same function.
+No node is left naming a deleted node as its `parent`.
+
+**A node write never breaks an area that keeps REQ-0067:** a `PUT` changing the `type` of a node
+such an area references away from `primary_substation` answers `422` `invalid_area_boundary` and
+changes nothing. An area stored before the rule is not re-judged by a write to its node, as the
+area `PUT` leaves such a sibling alone. A community stored holding one id twice keeps one after a
+`PUT` of that id: the first, replaced. Both routes take the community's row exclusively before
+reading the areas, as the area routes do, so an area write and a node write on one community are
+serialised.
 
 Topology is a collection with its own identity, like delivery points (REQ-0027), and the
 merge-by-id rule is theirs for the same reason. It is the route an onboarding template sync
@@ -356,15 +374,23 @@ each comes from:
 | `invalid_status` | `422` | a status outside the set, on every write path (REQ-0025, REQ-0066) |
 | `invalid_role` | `422` | a role outside the set, on every write path (REQ-0066) |
 | `unknown_area` | `422` | an area that is not a key of the community's areas, on every write path (REQ-0066) |
+| `invalid_area_boundary` | `422` | an area that is not one primary substation — one boundary, one `primary_substation` node with its id, no two areas on one boundary id — on the area `PUT`, the topology node `PUT` and the import (REQ-0067, REQ-0072) |
+| `topology_node_in_use` | `409` | deleting a topology node an area still references, or another node names as its `parent` (REQ-0072) |
+| `area_not_found` | `404` | renaming an area the community does not have (REQ-0079) |
+| `area_key_taken` | `409` | renaming an area onto a key the community already has (REQ-0079) |
+| `invalid_area_key` | `422` | an area key that is not letters, digits, `-` and `_`, starting with a letter or digit, at most 128 characters — on the area `PUT`, the rename's `new_key` and the import (REQ-0067, REQ-0079) |
+| `not_a_member` | `403` | a self-service read by a caller whose username names no member (REQ-0047) |
 
 `sensor_held` is `422` on an import, where the bundle is what is wrong (REQ-0069, REQ-0074).
 A route that answers a coded `422` declares its `422` in the OpenAPI document as either body —
 `oneOf` `ErrorResponse` and FastAPI's `HTTPValidationError`, whose `detail` is a list — since
 both arrive with that status: the member create, both `PATCH` routes (REQ-0070) and the status
-route, the asset `PUT`, and both import routes.
+route, the asset `PUT`, the area `PUT`, the area rename, the topology node `PUT`, and both
+import routes.
 The two `404` codes let a caller detaching a meter tell *"that member is gone"* from *"that
 meter is already detached"*. Every write route documents the body in the OpenAPI document as
-`ErrorResponse`, with the codes as the `ErrorCode` enum.
+`ErrorResponse`, with the codes as the `ErrorCode` enum, and so does every self-service route
+that answers `403 not_a_member`.
 
 A code names the rule, never the entity: it carries no key or id, and what the `detail` may name
 follows the rule already governing it (REQ-0060, REQ-0069). A code is added here by the
@@ -372,9 +398,45 @@ requirement that introduces its refusal. An import refusal (REQ-0074) carries th
 invariant it breaks. Refusals no requirement has given a code keep the plain
 `{"detail": "<sentence>"}` body — FastAPI's own validation errors, a body id or key that does
 not match the path, an unknown asset type, the import's `force` guard (REQ-0033), and the `404`
-for an unknown delivery point or area. Decided in
+for an unknown delivery point, topology node, or area on its `DELETE` (the rename's is coded).
+Decided in
 [ADR-0008](../decisions/ADR-0008-a-refusal-carries-a-machine-readable-code.md).
 
-**Planned:** two more codes arrive with the refusals that introduce them —
-`topology_node_in_use` (`409`, deleting a node an area still references, REQ-0072) and
-`invalid_area_boundary` (`422`, an area breaking the one-substation rule, REQ-0067).
+### REQ-0079 — an area's key is renamed in one write, with its members
+
+`POST /admin/communities/{ck}/areas/{area_key}/rename` with body `{"new_key": "<key>"}` moves
+an area to a new key. In **one transaction, under the community's row taken exclusively**, the
+area as stored — `name`, `boundary`, `topology`, and whatever else it carries — is written
+under `new_key`, every member of the community whose `area` is `area_key` is moved to
+`new_key`, **whatever their status**, and `area_key` is removed. It answers `{old_key, new_key,
+members_moved, community}`, the whole community after the rename. It derives
+`community.write` (REQ-0004).
+
+**Nothing else changes** (REQ-0031): not the other areas, not the topology, not a member's
+other fields, not a member's assets, not a member of another community whose `area` has the
+same key. The area is moved as stored, not re-judged against REQ-0067, and the set of
+boundary ids never changes — so no reader ever sees two areas on one boundary, both keys, or a
+member in an area that does not exist.
+
+**Refused, changing nothing:**
+
+- a `new_key` that is not an area key — letters, digits, `-` and `_`, starting with a letter
+  or digit, at most 128 characters (what `member.area` holds, and what onboarding's template
+  import accepts; the rule every write of a key holds, REQ-0067) — `422` `invalid_area_key`;
+- an `area_key` the community does not have — `404` `area_not_found`;
+- a `new_key` the community already has, `area_key` itself included — `409`
+  `area_key_taken`;
+- an unknown community — `404` `community_not_found`; a body other than `{new_key}` — `422`
+  (FastAPI's validation body).
+
+**Concurrency** follows the order every write takes its locks in: community row, then member
+rows (REQ-0066). A member write naming an area holds the row shared, so a rename waits for it
+and then moves that member too; a member write naming an area during a rename waits, then
+finds `area_key` gone (`422 unknown_area`) or `new_key` there. A write that names no area
+takes no community lock, waits on the member row the rename updated, and leaves the moved area
+as it is. Two renames of one area at once: one succeeds, the other finds it gone.
+
+This is how an onboarding template sync renames an area that has members: an area `PUT` under
+the new key is refused (`invalid_area_boundary`, one area per boundary) and a `DELETE` of the
+old key is refused (`area_in_use`) while members hold it. Decided in
+[ADR-0010](../decisions/ADR-0010-an-area-is-renamed-with-its-members-in-one-write.md).

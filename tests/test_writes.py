@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from celine.rec_registry.db.models import Asset
 from celine.rec_registry.schemas.bundle import DeliveryPointIn, MemberIn
 from celine.rec_registry.services import members as member_service
+from tests.substations import substation_area, substation_graph
 
 pytestmark = pytest.mark.asyncio
 
@@ -173,7 +174,7 @@ async def _seed_community(client, key: str = "test-rec", areas=("north", "south"
         "community": {
             "id": key,
             "name": "Test Community",
-            "areas": {a: {"name": a} for a in areas},
+            **substation_graph(*areas, spare=2),
         },
         "members": {},
     }
@@ -566,10 +567,10 @@ class TestCommunityWrites:
         key = await _seed_community(live_client)
 
         r = await live_client.put(
-            f"/admin/communities/{key}/areas/east", json={"name": "East"}
+            f"/admin/communities/{key}/areas/east", json=substation_area("East", 3)
         )
 
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
         assert set(r.json()["areas"]) == {"north", "south", "east"}
 
     async def test_area_in_use_cannot_be_deleted(self, live_client):
@@ -908,7 +909,94 @@ class TestNoWriteReducesASibling:
             },
         )
         await live_client.patch(f"/admin/communities/{key}", json={"description": "d"})
-        await live_client.put(f"/admin/communities/{key}/areas/west", json={"name": "West"})
+        # Areas (REQ-0067): one accepted, and refused ones — onto a sibling's
+        # substation, onto a node the topology does not hold, and under a key
+        # that is not an area key.
+        r = await live_client.put(
+            f"/admin/communities/{key}/areas/west", json=substation_area("West", 3)
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.put(
+            f"/admin/communities/{key}/areas/west", json=substation_area("West", 1)
+        )
+        assert r.status_code == 422, r.text
+        r = await live_client.put(
+            f"/admin/communities/{key}/areas/far", json=substation_area("Far", 9)
+        )
+        assert r.status_code == 422, r.text
+        r = await live_client.put(
+            f"/admin/communities/{key}/areas/far.east", json=substation_area("Far", 4)
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "invalid_area_key"
+
+        # Topology nodes (REQ-0072): a new one, a replaced one, a refused type
+        # change under an area, a refused delete of a node an area lists, and an
+        # accepted delete. Every other node survives each of them.
+        async def node_ids() -> list[str]:
+            r = await live_client.get(f"/admin/communities/{key}/topology")
+            return [n["id"] for n in r.json()["topology"]]
+
+        nodes_before = await node_ids()
+        topo = f"/admin/communities/{key}/topology"
+        r = await live_client.put(
+            f"{topo}/SS-9", json={"id": "SS-9", "type": "secondary_substation"}
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.put(
+            f"{topo}/SS-9",
+            json={"id": "SS-9", "type": "secondary_substation", "name": "Nine"},
+        )
+        assert r.status_code == 200, r.text
+        north = substation_area("North", 1)["topology"][0]
+        r = await live_client.put(f"{topo}/{north}", json={"id": north, "type": "feeder"})
+        assert r.status_code == 422, r.text
+        r = await live_client.delete(f"{topo}/{north}")
+        assert r.status_code == 409, r.text
+        assert await node_ids() == nodes_before + ["SS-9"]
+        r = await live_client.delete(f"{topo}/SS-9")
+        assert r.status_code == 200, r.text
+        assert await node_ids() == nodes_before
+        # A child names its parent (REQ-0072): the parent's delete is refused
+        # while the child is there, and every node survives it.
+        r = await live_client.put(
+            f"{topo}/SS-8", json={"id": "SS-8", "type": "secondary_substation"}
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.put(
+            f"{topo}/T-8", json={"id": "T-8", "type": "transformer", "parent": "SS-8"}
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.delete(f"{topo}/SS-8")
+        assert r.status_code == 409, r.text
+        assert await node_ids() == nodes_before + ["SS-8", "T-8"]
+        for node in ("T-8", "SS-8"):
+            r = await live_client.delete(f"{topo}/{node}")
+            assert r.status_code == 200, r.text
+        assert await node_ids() == nodes_before
+
+        # Area renames (REQ-0079): one moving a member, and refused ones — onto
+        # a key the community has, from one it has not, to an invalid key.
+        # Every other area, and the topology, survives each of them.
+        async def areas() -> dict:
+            r = await live_client.get(f"/admin/communities/{key}")
+            return r.json()["areas"]
+
+        areas_before = await areas()
+        rename = f"/admin/communities/{key}/areas/{{}}/rename"
+        r = await live_client.post(rename.format("south"), json={"new_key": "south-2"})
+        assert r.status_code == 200, r.text
+        assert r.json()["members_moved"] == 1
+        r = await live_client.post(rename.format("south-2"), json={"new_key": "west"})
+        assert r.status_code == 409, r.text
+        r = await live_client.post(rename.format("nowhere"), json={"new_key": "x"})
+        assert r.status_code == 404, r.text
+        r = await live_client.post(rename.format("south-2"), json={"new_key": "a b"})
+        assert r.status_code == 422, r.text
+        areas_after = await areas()
+        assert areas_after.pop("south-2") == areas_before.pop("south")
+        assert areas_after == areas_before
+        assert await node_ids() == nodes_before
 
         # Meters (REQ-0069, REQ-0071): an attach at `meter-<sensor id>`, one to
         # a suspended member (unchecked), a refused reactivation, a detach, an
@@ -992,6 +1080,56 @@ class TestRoundTrip:
         member = await live_client.get(f"/admin/communities/{key}/members/ex-00001")
         assert member.json()["did"] == did
         assert "did" not in member.json()["extra"]
+
+    async def test_a_v07_bundle_round_trips_with_its_areas(self, live_client):
+        """The example bundle, in the v0.7 shape, plus an area written through
+        the API: export, re-import, export again — the same community, areas'
+        boundaries and nodes included.
+
+        @verifies REQ-0037
+        @verifies REQ-0067
+        @verifies REQ-0068
+        """
+        import yaml
+
+        from tests.conftest import EXAMPLE_YAML
+        from tests.substations import SOURCE
+
+        bundle = yaml.safe_load(EXAMPLE_YAML.read_text())
+        assert bundle["schema_version"] == "0.7"
+        key = bundle["community"]["id"]
+        # A spare primary substation for the API to put an area on, carried by
+        # the import here (the topology node routes, REQ-0072, would do as well).
+        bundle["community"]["topology"].append(
+            {"id": "AC000E00003", "type": "primary_substation"}
+        )
+        r = await live_client.post("/admin/import", json={"bundle": bundle})
+        assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == []
+        r = await live_client.put(
+            f"/admin/communities/{key}/areas/eastern",
+            json=substation_area("eastern", 3),
+        )
+        assert r.status_code == 200, r.text
+
+        exported = await live_client.get("/admin/export", params={"community": key})
+        assert exported.status_code == 200, exported.text
+        first = yaml.safe_load(exported.text)
+        assert first["schema_version"] == "0.7"
+        areas = first["community"]["areas"]
+        assert areas["eastern"]["boundary"] == {"source": SOURCE, "id": "AC000E00003"}
+        assert areas["northern"]["topology"] == ["AC000E00001"]
+
+        reimport = await live_client.post(
+            "/admin/import", json={"bundle": first, "force": True}
+        )
+        assert reimport.status_code == 200, reimport.text
+        assert reimport.json()["warnings"] == []
+
+        again = await live_client.get("/admin/export", params={"community": key})
+        second = yaml.safe_load(again.text)
+        assert second["community"] == first["community"]
+        assert second["members"] == first["members"]
 
     async def test_a_member_without_a_did_exports_without_the_field(
         self, live_client
@@ -1133,6 +1271,111 @@ class TestImportGuard:
         assert r.status_code == 200
         gone = await live_client.get(f"/admin/communities/{key}/members/m1")
         assert gone.status_code == 404
+
+
+@pytest.mark.integration
+class TestRetirement:
+    """A community is retired by a forced import naming it with no members
+    (REQ-0075, ADR-0009): its members and assets go, the community stays with
+    the bundle's metadata, and every sensor it held is free again."""
+
+    @staticmethod
+    def _meter(sensor_id: str) -> dict:
+        return {
+            "key": f"meter-{sensor_id}",
+            "asset_type": "meter",
+            "properties": {"name": "M", "sensor_id": sensor_id, "meter_type": "consumption"},
+        }
+
+    async def _populated(self, client, key: str) -> None:
+        await _seed_community(client, key)
+        for n, sensor in ((1, "SEN-R1"), (2, "SEN-R2")):
+            r = await client.post(
+                f"/admin/communities/{key}/members",
+                json=_member_payload(key=f"m{n}", user_id=f"kc-r{n}", delivery_points=[]),
+            )
+            assert r.status_code == 201, r.text
+            r = await client.put(
+                f"/admin/communities/{key}/members/m{n}/assets/meter-{sensor}",
+                json=self._meter(sensor),
+            )
+            assert r.status_code == 200, r.text
+
+    @staticmethod
+    def _retirement(key: str) -> dict:
+        return {
+            "version": "1.0",
+            "schema_version": "0.7",
+            "community": {
+                "id": key,
+                "name": "Retired Community",
+                "description": "retired",
+                **substation_graph("north"),
+            },
+            "members": {},
+        }
+
+    async def test_members_and_assets_go_and_the_community_stays(self, live_client):
+        """@verifies REQ-0075"""
+        old = "old-rec"
+        await self._populated(live_client, old)
+        before = (await live_client.get(f"/admin/communities/{old}")).json()
+
+        r = await live_client.post(
+            "/admin/import", json={"bundle": self._retirement(old), "force": True}
+        )
+
+        assert r.status_code == 200, r.text
+        report = r.json()
+        assert report["deleted"] == {"community": 1, "member": 2, "asset": 2}
+        assert report["inserted"] == {"community": 1, "member": 0, "asset": 0}
+
+        community = await live_client.get(f"/admin/communities/{old}")
+        assert community.status_code == 200, community.text
+        assert community.json()["name"] == "Retired Community"
+        assert community.json()["description"] == "retired"
+        # Kept by key; the row is written anew.
+        assert community.json()["id"] != before["id"]
+        assert set(community.json()["areas"]) == {"north"}
+        members = await live_client.get(f"/admin/communities/{old}/members")
+        assert members.json()["items"] == []
+        assets = await live_client.get(f"/admin/communities/{old}/assets")
+        assert assets.json()["items"] == []
+
+    async def test_its_sensors_can_be_attached_elsewhere_afterwards(self, live_client):
+        """@verifies REQ-0075"""
+        old, new = "old-rec", "new-rec"
+        await self._populated(live_client, old)
+        await _seed_community(live_client, new)
+        r = await live_client.post(
+            f"/admin/communities/{new}/members",
+            json=_member_payload(key="n1", user_id="kc-n1", delivery_points=[]),
+        )
+        assert r.status_code == 201, r.text
+        attach = f"/admin/communities/{new}/members/n1/assets/meter-SEN-R1"
+
+        held = await live_client.put(attach, json=self._meter("SEN-R1"))
+        assert held.status_code == 409, held.text
+        assert held.json()["code"] == "sensor_held"
+
+        r = await live_client.post(
+            "/admin/import", json={"bundle": self._retirement(old), "force": True}
+        )
+        assert r.status_code == 200, r.text
+
+        freed = await live_client.put(attach, json=self._meter("SEN-R1"))
+        assert freed.status_code == 200, freed.text
+
+    async def test_without_force_nothing_is_retired(self, live_client):
+        """@verifies REQ-0075"""
+        old = "old-rec"
+        await self._populated(live_client, old)
+
+        r = await live_client.post("/admin/import", json={"bundle": self._retirement(old)})
+
+        assert r.status_code == 409, r.text
+        members = await live_client.get(f"/admin/communities/{old}/members")
+        assert len(members.json()["items"]) == 2
 
 
 # =============================================================================
@@ -1354,7 +1597,7 @@ class TestTheSchemaVersionThroughTheApi:
             "community": {
                 "id": key,
                 "name": "Versioned Community",
-                "areas": {"north": {"name": "north"}},
+                **substation_graph("north"),
             },
             "members": {},
         }

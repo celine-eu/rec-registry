@@ -368,3 +368,160 @@ class TestDuplicateSensorsCommand:
         result, _, _ = self._run('{"detail": "Forbidden"}', status=403)
 
         assert result.exit_code == 2
+
+
+# =============================================================================
+# invalid-area-boundaries — the read-only report of areas breaking REQ-0067
+# =============================================================================
+
+
+def _area_doc(community: str, areas: dict, topology: list) -> dict:
+    return {
+        "community": {"id": community, "name": community, "areas": areas, "topology": topology},
+        "members": {},
+    }
+
+
+def _good(community: str = "example-rec") -> dict:
+    from tests.substations import substation_graph
+
+    graph = substation_graph("north", "south")
+    return _area_doc(community, graph["areas"], graph["topology"])
+
+
+def _broken(community: str = "example-rec-old") -> dict:
+    from tests.substations import substation_area, substation_code, substation_node
+
+    two_nodes = substation_area("East", 3)
+    two_nodes["topology"].append(substation_code(4))
+    return _area_doc(
+        community,
+        {
+            "legacy": {"name": "Legacy", "topology": [substation_code(1)]},
+            "east": two_nodes,
+            "north": substation_area("North", 1),
+        },
+        [substation_node(n) for n in (1, 3, 4)],
+    )
+
+
+class TestFindInvalidAreaBoundaries:
+    def test_a_community_that_keeps_the_rule_reports_nothing(self):
+        """@verifies REQ-0078"""
+        from celine.rec_registry.cli.main import find_invalid_area_boundaries
+
+        assert find_invalid_area_boundaries([_good()]) == []
+
+    def test_every_broken_rule_is_reported_by_community(self):
+        """Judged with the check the writes use, over every area.
+
+        @verifies REQ-0078
+        """
+        from celine.rec_registry.cli.main import find_invalid_area_boundaries
+        from celine.rec_registry.core.area_boundary import area_boundary_refusals
+
+        broken = _broken()
+        found = find_invalid_area_boundaries([_good(), broken])
+
+        expected = area_boundary_refusals(
+            broken["community"]["areas"], broken["community"]["topology"]
+        )
+        assert found == sorted(("example-rec-old", d) for d in expected)
+        assert any("'legacy'" in d and "no boundary" in d for _, d in found)
+        assert any("'east'" in d and "2 topology nodes" in d for _, d in found)
+        assert not any("'north'" in d for _, d in found)
+
+    def test_a_key_that_is_not_an_area_key_is_reported(self):
+        """A stored key a re-import would refuse `invalid_area_key` (REQ-0067),
+        judged with the function the import uses, before the boundary lines.
+
+        @verifies REQ-0078
+        """
+        from tests.substations import substation_area, substation_node
+
+        from celine.rec_registry.cli.main import find_invalid_area_boundaries
+        from celine.rec_registry.core.area_boundary import area_key_refusals
+
+        areas = {
+            "north zone": substation_area("North", 1),
+            "south.2": substation_area("South", 2),
+            "east": substation_area("East", 3),
+        }
+        doc = _area_doc(
+            "example-rec-old", areas, [substation_node(n) for n in (1, 2, 3)]
+        )
+
+        found = find_invalid_area_boundaries([_good(), doc])
+
+        assert found == sorted(("example-rec-old", d) for d in area_key_refusals(areas))
+        assert len(found) == 2
+        assert any("'north zone'" in d and "not an area key" in d for _, d in found)
+        assert any("'south.2'" in d for _, d in found)
+        assert not any("'east'" in d for _, d in found)
+
+    def test_a_refusal_names_no_boundary_or_node_id(self):
+        """@verifies REQ-0078"""
+        from celine.rec_registry.cli.main import find_invalid_area_boundaries
+
+        for _, detail in find_invalid_area_boundaries([_broken()]):
+            assert "AC000E" not in detail
+
+    def test_a_community_with_no_areas_reports_nothing(self):
+        """@verifies REQ-0078"""
+        from celine.rec_registry.cli.main import find_invalid_area_boundaries
+
+        doc = {"community": {"id": "example-rec", "name": "x"}, "members": {}}
+        assert find_invalid_area_boundaries([doc]) == []
+
+
+class TestInvalidAreaBoundariesCommand:
+    def _run(self, text: str, status: int = 200):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.text = text
+        get = MagicMock(return_value=resp)
+        post = MagicMock()
+        with patch(HTTPX_GET, get), patch(HTTPX_POST, post):
+            result = runner.invoke(
+                app, ["invalid-area-boundaries", "--token", "fake-jwt-token"]
+            )
+        return result, get, post
+
+    def test_none_exits_zero(self):
+        """@verifies REQ-0078"""
+        import yaml
+
+        result, _, _ = self._run(yaml.safe_dump(_good()))
+
+        assert result.exit_code == 0, result.output
+        assert "keeps the one-substation rule" in result.output
+
+    def test_broken_areas_are_listed_and_exit_non_zero(self):
+        """@verifies REQ-0078"""
+        import yaml
+
+        result, _, _ = self._run(yaml.safe_dump_all([_good(), _broken()]))
+
+        assert result.exit_code == 1, result.output
+        assert "community\trefusal" in result.output
+        assert "example-rec-old\tarea 'legacy' carries no boundary" in result.output
+        assert "example-rec\t" not in result.output.replace("example-rec-old\t", "")
+
+    def test_it_only_reads_the_export(self):
+        """One GET of `/admin/export`, no other request.
+
+        @verifies REQ-0078
+        """
+        result, get, post = self._run("")
+
+        assert result.exit_code == 0, result.output
+        get.assert_called_once()
+        assert get.call_args.args[0].endswith("/admin/export")
+        assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer fake-jwt-token"
+        post.assert_not_called()
+
+    def test_an_unreadable_registry_is_not_reported_as_clean(self):
+        """@verifies REQ-0078"""
+        result, _, _ = self._run('{"detail": "Forbidden"}', status=403)
+
+        assert result.exit_code == 2

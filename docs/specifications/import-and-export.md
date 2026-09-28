@@ -48,8 +48,8 @@ A dry run against an existing community **reports instead of refusing**, even wi
 so the guard must not block the request that informs it.
 
 It also lists, in the report's `refusals`, every `sensor_held` refusal the import would make
-(REQ-0069), and every `invalid_role`, `invalid_status` and `unknown_area` refusal (REQ-0066,
-REQ-0074). **Planned:** the area-boundary refusal too (REQ-0067).
+(REQ-0069), every `invalid_role`, `invalid_status` and `unknown_area` refusal (REQ-0066,
+REQ-0074), and every `invalid_area_boundary` refusal (REQ-0067).
 
 ### REQ-0035 — a meter with no sensor id is skipped, with a warning naming it
 
@@ -94,15 +94,16 @@ arrive at runtime the database is the source of truth.
 One field is knowingly excluded from this guarantee: the declared schema version does not
 survive the round trip (REQ-0018).
 
+Areas keep the guarantee too: a v0.7 community whose areas arrived by bundle and by the area
+`PUT` exports them with their `boundary` and `topology` and re-imports unchanged, with no
+warning. An export taken before schema v0.7 has areas without a boundary, which REQ-0074
+refuses, so it has to be reshaped before it restores.
+
 **Planned:** the source of truth becomes per collection — areas come from onboarding
 templates ([ADR-0006](../decisions/ADR-0006-onboarding-templates-are-the-source-of-truth-for-areas.md)),
-members through onboarding, meters from a manager — and the database holds all three. The round
-trip keeps holding for a community exported after schema v0.7; an export taken before it has
-areas without a boundary, which REQ-0074 refuses, so it has to be reshaped before it restores.
+members through onboarding, meters from a manager — and the database holds all three.
 
 ### REQ-0074 — an import that breaks an invariant is refused whole, before any database work
-
-**Status:** planned
 
 A bundle is refused, and nothing is deleted or inserted, when:
 
@@ -113,7 +114,10 @@ A bundle is refused, and nothing is deleted or inserted, when:
   (REQ-0028), implemented with the sensor clause;
 - a member's `role` or `status` is outside its set, or its `area` is not one of the bundle's
   areas (REQ-0066);
-- an area breaks the one-substation rule (REQ-0067).
+- an area's key is not an area key — `invalid_area_key` (REQ-0067), one refusal per key;
+- an area breaks the one-substation rule — `invalid_area_boundary` (REQ-0067), one refusal per
+  area and one per boundary id two areas share, judged against the bundle's own
+  `community.topology`.
 
 The refusal is `422` over HTTP and a non-zero exit from the CLI, with the code of the invariant
 (REQ-0073) and a report naming the offending member, asset and area keys of **this** bundle; a
@@ -128,21 +132,23 @@ writes already refuse these rows, and an import that only warned would be the wa
 them anyway. Decided in
 [ADR-0007](../decisions/ADR-0007-import-refuses-a-bundle-that-breaks-an-invariant.md).
 
-The first three bullets are enforced, with this refusal's shape: the sensor clause as
-REQ-0069 describes, the asset-key length with it, and the role, status and area clause as
-REQ-0066 describes — each out-of-set field one refusal, `member '<key>': role 'x' is not one
-of …`, and the area judged against the bundle's own `community.areas`. The last lands with
-REQ-0067, and this requirement stays planned until it does.
+Each clause has this refusal's shape: the sensor clause as REQ-0069 describes, the asset-key
+length with it, the role, status and area clause as REQ-0066 describes — each out-of-set field
+one refusal, `member '<key>': role 'x' is not one of …`, the area judged against the bundle's
+own `community.areas` — and the area-key and area-boundary clauses as REQ-0067 describes. A
+refused forced re-import leaves the existing community as it was. The real import's `code` is
+the first refusal's, in the order member values, area keys, area boundaries, asset keys,
+sensors.
 
 ### REQ-0075 — a community is retired by a forced import naming it with no members
-
-**Status:** planned
 
 A forced import of a bundle that names an existing community and carries no members deletes
 every member and asset of that community and keeps the community, with the metadata the bundle
 carries. The report counts what was deleted, as REQ-0036 says. Every sensor the old members
 held is released, so a sensor can be attached in another community afterwards without
-`sensor_held`.
+`sensor_held`. Without `force` it is refused like any overwrite (REQ-0033) and nothing is
+deleted. "Keeps the community" is by key: the import replaces the graph (REQ-0032), so the
+community's row is written anew under the same key and answers a new `id`.
 
 There is no community delete route and no retired status: retirement is this import, performed
 by an operator holding the import grant — the grant that is purge-equivalent for a whole

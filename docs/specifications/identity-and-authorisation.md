@@ -42,12 +42,13 @@ every caller during development.
 
 ### REQ-0004 — community metadata and areas are one grant of their own
 
-`PATCH /admin/communities/{ck}` and any write on `…/areas/{key}` derive `community.write`.
-Areas are community structure rather than membership, so they are authorised with the
-community and not with the members who reference them.
-
-**Planned:** the topology node routes of REQ-0072 derive `community.write` too, for the same
-reason — a node is community structure.
+`PATCH /admin/communities/{ck}`, any write on `…/areas/{key}`, `POST …/areas/{key}/rename`
+(REQ-0079) and any write on `…/topology/{node_id}` (REQ-0072) derive `community.write`. Areas
+and topology nodes are community structure rather than membership, so they are authorised with
+the community and not with the members who reference them — a rename moves members' `area`
+with the area, and is still a community write, which neither `members.write` nor
+`members.profile.write` reaches. Any other method on `…/rename` derives `admin`. A node id or
+area key is caller-chosen like any other id, and chooses no action (REQ-0065).
 
 ### REQ-0005 — import, export and lookup keep their own actions, and one lookup is named apart
 

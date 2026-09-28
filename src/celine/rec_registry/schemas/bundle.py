@@ -1,10 +1,10 @@
 """
 Pydantic schemas for the registry bundle format.
 
-The models here follow `schemas/community/v0.6/community.schema.json` — the
-`OperatorIn` model and `TopologyNodeIn.operator_id` are v0.5 additions and
-`MemberIn.did` is the v0.6 one, so the docstring that said v0.4 was describing a
-shape this file stopped having. `core/versions.py` says which version that is;
+The models here follow `schemas/community/v0.7/community.schema.json` — the
+`OperatorIn` model and `TopologyNodeIn.operator_id` are v0.5 additions,
+`MemberIn.did` is the v0.6 one and `AreaIn.boundary` the v0.7 one, so the
+docstring that said v0.4 was describing a shape this file stopped having. `core/versions.py` says which version that is;
 nothing here restates it.
 
 Supports:
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 from pydantic import BaseModel, Field, ConfigDict
+from pydantic.json_schema import SkipJsonSchema
 
 from celine.rec_registry.core.versions import (
     CURRENT_SCHEMA_VERSION,
@@ -36,11 +37,48 @@ class LocationIn(BaseModel):
     lon: float
 
 
+class AreaBoundaryIn(BaseModel):
+    """The primary-substation boundary an area references (REQ-0067, schema v0.7).
+
+    `source` names the boundary dataset (`gse_cabine_primarie`), `id` the
+    substation code within it (`cod_ac`). Both are plain strings so that a wrong
+    value is refused with the code `invalid_area_boundary` rather than as a
+    validation error (REQ-0073); the registry never checks `id` against the
+    dataset, which it cannot read.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(description="The boundary dataset: `gse_cabine_primarie`.")
+    id: str = Field(
+        max_length=64,
+        description=(
+            "The substation code (`cod_ac`); equal to the id of the area's one "
+            "`primary_substation` topology node. At most 64 characters; a longer "
+            "one is refused with `invalid_area_boundary`."
+        ),
+    )
+
+
 class AreaIn(BaseModel):
-    """Community area definition."""
+    """Community area definition.
+
+    One primary substation (REQ-0067): `boundary` references it, and `topology`
+    lists exactly one node — a `primary_substation` whose id is `boundary.id`.
+    `boundary` is published as `AreaBoundaryIn` but accepts anything here, so
+    that an area with none, with a list of them or with a malformed one is
+    refused with `invalid_area_boundary` by the import's check rather than as a
+    validation error at parse time (REQ-0073).
+    """
     model_config = ConfigDict(extra="allow")
 
     name: str
+    boundary: AreaBoundaryIn | SkipJsonSchema[Any] = Field(
+        default=None,
+        union_mode="left_to_right",
+        description="The primary-substation boundary, `{source, id}`. Required.",
+        # No `"default": null` beside a type that is not nullable.
+        json_schema_extra=lambda schema: schema.pop("default", None),
+    )
     topology: list[str] = Field(default_factory=list)  # topology node IDs from community.topology
     location: LocationIn | None = None
     geometry: dict | None = None  # GeoJSON geometry (Point, Polygon, MultiPolygon, …)
@@ -64,7 +102,12 @@ class OperatorIn(BaseModel):
 # =============================================================================
 
 class TopologyNodeIn(BaseModel):
-    """Grid topology node (substation, transformer, etc.)."""
+    """Grid topology node (substation, transformer, etc.).
+
+    The body of the topology node `PUT` too (REQ-0072), and the names every
+    read answers (`TopologyNode`): `operator_id`, `parent`. Keys beyond these
+    are accepted and not stored, on the import and on the `PUT` alike.
+    """
     model_config = ConfigDict(extra="allow")
 
     id: str
@@ -344,7 +387,7 @@ class RegistryBundleIn(BaseModel):
     """
     Complete registry bundle for import.
 
-    Matches `schemas/community/v0.6/community.schema.json`.
+    Matches `schemas/community/v0.7/community.schema.json`.
     """
     model_config = ConfigDict(extra="allow")
 

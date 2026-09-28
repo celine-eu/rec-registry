@@ -21,6 +21,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from celine.rec_registry.core.area_boundary import (
+    AREA_KEY_RULE,
+    area_boundary_refusals,
+    areas_referencing,
+    child_nodes,
+    is_area_key,
+    node_write_refusals,
+)
 from celine.rec_registry.core.errors import ErrorCode, RegistryError, error_responses
 from celine.rec_registry.core.member_values import OutOfSet, member_value_refusals
 from celine.rec_registry.db.models import Asset, Community, Member
@@ -33,9 +41,12 @@ from celine.rec_registry.schemas.bundle import (
     MeterAssetIn,
     PVAssetIn,
     StorageAssetIn,
+    TopologyNodeIn,
 )
 from celine.rec_registry.schemas.models import (
     Area,
+    AreaRename,
+    AreaRenamed,
     AreaUpsert,
     AssetDetail,
     AssetUpsert,
@@ -678,7 +689,9 @@ async def patch_community(
     payload: CommunityPatch,
     session: AsyncSession = Depends(get_session),
 ):
-    """Update community metadata. Areas and topology have their own routes."""
+    """Update community metadata. Areas and topology have their own routes
+    (`…/areas/{key}`, `…/areas/{key}/rename`, `…/topology/{node_id}`), and
+    this never touches either."""
     community, _ = await _resolve(session, community_key)
 
     patch = payload.model_dump(exclude_unset=True)
@@ -711,7 +724,7 @@ async def patch_community(
 @router.put(
     "/communities/{community_key}/areas/{area_key}",
     response_model=CommunityDetail,
-    responses=error_responses(404),
+    responses=error_responses(404, 422),
 )
 async def upsert_area(
     community_key: str,
@@ -723,16 +736,57 @@ async def upsert_area(
 
     Topology assignments change more often than the community does, so this is a
     sub-resource rather than part of the community patch.
+
+    **An area is one primary substation** (REQ-0067): `boundary: {source, id}`
+    with `source` `gse_cabine_primarie`, and `topology` listing exactly one node
+    id — `boundary.id`, a node of the community's topology whose `type` is
+    `primary_substation`. No other area of the community may carry the same
+    `boundary.id`. Anything else is `422 invalid_area_boundary` and changes
+    nothing — including a node the community's topology does not hold yet,
+    which has to be written first. Areas stored before the rule are not
+    re-judged, except that the written area may not share their boundary id.
+
+    **The key is an area key** — letters, digits, `-` and `_`, starting with a
+    letter or digit, at most 128 characters, what a rename accepts — or the
+    write is `422 invalid_area_key` and changes nothing. An area stored under
+    another key is read as stored; a rename moves it onto one that keeps the
+    rule.
     """
     community, _ = await _resolve(session, community_key)
+    if not is_area_key(area_key):
+        raise RegistryError(
+            422,
+            f"The area key is not a valid area key: {AREA_KEY_RULE}",
+            ErrorCode.INVALID_AREA_KEY,
+        )
+    # Exclusively, and before reading the siblings: two writers putting two
+    # areas onto one substation at once are serialised here, and the second
+    # sees the first's boundary (REQ-0067). Also what `delete_area` takes.
+    await member_service.lock_community(session, community, share=False)
 
-    entry = {"name": payload.name, "topology": payload.topology}
+    entry = {"name": payload.name, "topology": list(payload.topology)}
+    if payload.boundary is not None:
+        # Judged below before anything is stored; only an `AreaBoundaryIn`
+        # passes, so what is stored is always `{source, id}`.
+        boundary = payload.boundary
+        entry["boundary"] = (
+            boundary.model_dump() if hasattr(boundary, "model_dump") else boundary
+        )
     if payload.location is not None:
         entry["location"] = payload.location.model_dump()
     if payload.geometry is not None:
         entry["geometry"] = payload.geometry
 
-    community.areas = {**(community.areas or {}), area_key: entry}
+    areas = {**(community.areas or {}), area_key: entry}
+    refusals = area_boundary_refusals(
+        areas, community.topology or [], only=[area_key]
+    )
+    if refusals:
+        raise RegistryError(
+            422, "; ".join(refusals), ErrorCode.INVALID_AREA_BOUNDARY
+        )
+
+    community.areas = areas
     await session.commit()
     await session.refresh(community)
 
@@ -781,6 +835,169 @@ async def delete_area(
         )
 
     community.areas = {k: v for k, v in areas.items() if k != area_key}
+    await session.commit()
+
+    return await patch_community(community_key, CommunityPatch(), session)
+
+
+@router.post(
+    "/communities/{community_key}/areas/{area_key}/rename",
+    response_model=AreaRenamed,
+    responses=error_responses(404, 409, 422),
+)
+async def rename_area(
+    community_key: str,
+    area_key: str,
+    payload: AreaRename,
+    session: AsyncSession = Depends(get_session),
+):
+    """Move an area to a new key, with its members, in one write (REQ-0079).
+
+    The area — name, boundary, topology, as stored — is written under
+    `new_key`, every member of the community whose `area` is `area_key`
+    (active or not) is moved to `new_key`, and `area_key` is removed: one
+    transaction, under the community's row taken exclusively, so no reader
+    sees both keys, or a member in an area that does not exist, or two areas
+    on one boundary (REQ-0067). Nothing else changes — not the other areas,
+    not the members' other fields, not their assets.
+
+    This is how an onboarding template sync renames an area whose substation
+    the registry already holds under another key: an area `PUT` under the new
+    key would be refused (one area per boundary), and the old key cannot be
+    deleted while members hold it.
+
+    Refused, changing nothing: `422 invalid_area_key` for a `new_key` that is
+    not an area key; `404 area_not_found` for an `area_key` the community does
+    not have; `409 area_key_taken` for a `new_key` it already has. Derives
+    `community.write`.
+    """
+    community, _ = await _resolve(session, community_key)
+
+    try:
+        moved = await member_service.rename_area(
+            session, community, area_key, payload.new_key
+        )
+    except member_service.AreaRenameRefused as exc:
+        raise RegistryError(exc.status, str(exc), exc.code) from exc
+
+    await session.commit()
+    await session.refresh(community)
+
+    return AreaRenamed(
+        old_key=area_key,
+        new_key=payload.new_key,
+        members_moved=moved,
+        community=await patch_community(community_key, CommunityPatch(), session),
+    )
+
+
+# =============================================================================
+# Topology nodes
+# =============================================================================
+
+
+@router.put(
+    "/communities/{community_key}/topology/{node_id}",
+    response_model=CommunityDetail,
+    responses=error_responses(404, 422),
+)
+async def upsert_topology_node(
+    community_key: str,
+    node_id: str,
+    payload: TopologyNodeIn,
+    session: AsyncSession = Depends(get_session),
+):
+    """Add or replace one topology node, keeping the others (REQ-0072).
+
+    Nodes merge by `id`, as delivery points do: re-sending an existing id
+    replaces that node where it stands, and a new id is appended. The body is
+    the bundle's topology node — `id`, `type`, and optionally `name`,
+    `operator_id`, `parent`, `area` — under the names every read answers;
+    other keys are not stored. The body `id` must match the path, or `422`.
+
+    **A node write never breaks an area that keeps the one-substation rule**
+    (REQ-0067): changing the `type` of a node such an area lists away from
+    `primary_substation` is `422 invalid_area_boundary` and changes nothing.
+    This is the route an onboarding template sync writes a community's
+    substations through, before the areas that reference them.
+
+    Answers the whole community, so the caller can see the others are still
+    there.
+    """
+    community, _ = await _resolve(session, community_key)
+
+    if payload.id != node_id:
+        raise HTTPException(
+            422, f"Body id {payload.id!r} does not match path id {node_id!r}"
+        )
+
+    # Exclusively, before reading the areas: an area `PUT` onto this node at
+    # the same moment is serialised on the same row (REQ-0067).
+    await member_service.lock_community(session, community, share=False)
+
+    before = list(community.topology or [])
+    after = member_service.merge_topology_node(before, payload)
+    refusals = node_write_refusals(community.areas or {}, before, after, node_id)
+    if refusals:
+        raise RegistryError(
+            422, "; ".join(refusals), ErrorCode.INVALID_AREA_BOUNDARY
+        )
+
+    community.topology = after
+    await session.commit()
+    await session.refresh(community)
+
+    return await patch_community(community_key, CommunityPatch(), session)
+
+
+@router.delete(
+    "/communities/{community_key}/topology/{node_id}",
+    response_model=CommunityDetail,
+    responses=error_responses(404, 409),
+)
+async def delete_topology_node(
+    community_key: str,
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Remove one topology node, unless something still references it (REQ-0072).
+
+    A node an area lists is `409 topology_node_in_use`, naming the areas —
+    whether or not those areas keep the one-substation rule — so the areas are
+    changed or deleted first. So is a node another node names as its
+    `parent`, naming those nodes by id, so they are re-parented or deleted
+    first. A node the community does not have is `404`.
+    """
+    community, _ = await _resolve(session, community_key)
+    # Exclusively, before reading the areas: an area `PUT` naming this node at
+    # the same moment either commits first and is counted, or finds it gone.
+    await member_service.lock_community(session, community, share=False)
+
+    topology = list(community.topology or [])
+    if not any(n.get("id") == node_id for n in topology):
+        raise HTTPException(404, f"Topology node {node_id!r} not found")
+
+    in_use = areas_referencing(community.areas or {}, node_id)
+    if in_use:
+        named = ", ".join(repr(k) for k in in_use)
+        raise RegistryError(
+            409,
+            f"Topology node {node_id!r} is still referenced by area(s) {named}; "
+            "change or delete them first",
+            ErrorCode.TOPOLOGY_NODE_IN_USE,
+        )
+
+    children = child_nodes(topology, node_id)
+    if children:
+        named = ", ".join(repr(k) for k in children)
+        raise RegistryError(
+            409,
+            f"Topology node {node_id!r} is the parent of node(s) {named}; "
+            "re-parent or delete them first",
+            ErrorCode.TOPOLOGY_NODE_IN_USE,
+        )
+
+    community.topology = member_service.remove_topology_node(topology, node_id)
     await session.commit()
 
     return await patch_community(community_key, CommunityPatch(), session)

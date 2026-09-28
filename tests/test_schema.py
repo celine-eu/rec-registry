@@ -17,7 +17,7 @@ class TestBundleParsing:
 
     def test_schema_version(self, example_bundle):
         """@verifies REQ-0018"""
-        assert example_bundle.schema_version == "0.6"
+        assert example_bundle.schema_version == "0.7"
 
     def test_community_id(self, example_bundle):
         """@verifies REQ-0011"""
@@ -31,7 +31,20 @@ class TestBundleParsing:
     def test_area_topology(self, example_bundle):
         """@verifies REQ-0011"""
         northern = example_bundle.community.areas["northern"]
-        assert northern.topology == ["AC001E00001"]
+        assert northern.topology == ["AC000E00001"]
+
+    def test_each_example_area_is_one_primary_substation(self, example_bundle):
+        """The example is what a reader copies, so it keeps the v0.7 rule.
+
+        @verifies REQ-0067"""
+        from celine.rec_registry.core.area_boundary import area_boundary_refusals
+
+        community = example_bundle.community
+        assert community.areas["northern"].boundary.model_dump() == {
+            "source": "gse_cabine_primarie",
+            "id": "AC000E00001",
+        }
+        assert area_boundary_refusals(community.areas, community.topology) == []
 
     def test_community_topology_nodes(self, example_bundle):
         """@verifies REQ-0011"""

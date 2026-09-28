@@ -81,6 +81,17 @@ class TestActionDerivation:
             == "community.write"
         )
 
+    @pytest.mark.parametrize("method", ["PUT", "DELETE"])
+    def test_a_topology_node_write_is_a_community_write(self, method):
+        """A node is community structure, like an area (REQ-0072).
+
+        @verifies REQ-0004
+        """
+        assert (
+            action(None, "/admin/communities/rec-a/topology/AC000E00001", method)
+            == "community.write"
+        )
+
     def test_import_and_export_keep_their_own_actions(self):
         """@verifies REQ-0005"""
         assert action(None, "/admin/import", "POST") == "import"
@@ -239,12 +250,14 @@ HOSTILE_WORDS = [
     "profile",
     "status",
     "areas",
+    "topology",
     "delivery-points",
     "communities",
     "admin",
     "yaml",
     "assets-by-user-ids",
     "members-by-dids",
+    "rename",
 ]
 
 
@@ -264,6 +277,10 @@ ROUTES = [
     ("PATCH", "/admin/communities/{id}", "community.write"),
     ("PUT", "/admin/communities/{id}/areas/{id}", "community.write"),
     ("DELETE", "/admin/communities/{id}/areas/{id}", "community.write"),
+    ("POST", "/admin/communities/{id}/areas/{id}/rename", "community.write"),
+    ("PUT", "/admin/communities/{id}/topology/{id}", "community.write"),
+    ("DELETE", "/admin/communities/{id}/topology/{id}", "community.write"),
+    ("GET", "/admin/communities/{id}/topology", "read"),
     ("POST", "/admin/communities/{id}/members", "members.write"),
     ("PATCH", "/admin/communities/{id}/members/{id}", "members.write"),
     ("DELETE", "/admin/communities/{id}/members/{id}", "members.write"),
@@ -374,6 +391,16 @@ class TestACallerSuppliedIdNeverChoosesTheAction:
             ("PUT", "/admin/communities/rec-a/members/m1/assets/a/extra"),
             ("POST", "/admin/communities/rec-a/lookup"),
             ("PUT", "/admin/communities/rec-a/members/m1/export"),
+            ("PUT", "/admin/communities/rec-a/topology"),
+            ("POST", "/admin/communities/rec-a/topology"),
+            ("PUT", "/admin/communities/rec-a/topology/n1/extra"),
+            ("PUT", "/admin/communities/rec-a/areas/north/rename"),
+            ("PATCH", "/admin/communities/rec-a/areas/north/rename"),
+            ("DELETE", "/admin/communities/rec-a/areas/north/rename"),
+            ("POST", "/admin/communities/rec-a/areas/north/rename/extra"),
+            ("POST", "/admin/communities/rec-a/areas/north/other"),
+            ("POST", "/admin/communities/rec-a/members/m1/rename"),
+            ("POST", "/admin/communities/rec-a/topology/n1/rename"),
             ("POST", "/admin/somewhere-new"),
             ("PUT", "/admin"),
         ],
@@ -461,3 +488,61 @@ class TestThroughTheMiddleware:
         client = self._client(monkeypatch, "rec-registry.assets.write")
         r = client.put(self.ASSET, json=self.BODY)
         assert r.status_code == 418, r.text
+
+    NODE = "/admin/communities/rec-a/topology/meter-lookup-01"
+    NODE_BODY = {"id": "meter-lookup-01", "type": "primary_substation"}
+
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "rec-registry.lookup",
+            "rec-registry.members.write",
+            "rec-registry.assets.write",
+            "rec-registry.read",
+        ],
+    )
+    def test_only_the_community_grant_writes_a_topology_node(self, monkeypatch, scope):
+        """A node id spelling `lookup` chooses nothing; neither the member,
+        asset nor read grant reaches a node write (REQ-0072).
+
+        @verifies REQ-0004
+        """
+        client = self._client(monkeypatch, scope)
+        assert client.put(self.NODE, json=self.NODE_BODY).status_code == 403
+        assert client.delete(self.NODE).status_code == 403
+
+    def test_the_community_grant_reaches_the_node_routes(self, monkeypatch):
+        """@verifies REQ-0004"""
+        client = self._client(monkeypatch, "rec-registry.community.write")
+        assert client.put(self.NODE, json=self.NODE_BODY).status_code == 418
+        assert client.delete(self.NODE).status_code == 418
+
+    RENAME = "/admin/communities/rec-a/areas/meter-lookup-01/rename"
+
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "rec-registry.lookup",
+            "rec-registry.members.write",
+            "rec-registry.members.profile.write",
+            "rec-registry.assets.write",
+            "rec-registry.read",
+        ],
+    )
+    def test_only_the_community_grant_renames_an_area(self, monkeypatch, scope):
+        """An area key spelling `lookup` chooses nothing; the member, profile,
+        asset and read grants do not reach a rename, although it moves
+        members' areas (REQ-0079).
+
+        @verifies REQ-0004
+        @verifies REQ-0079
+        """
+        client = self._client(monkeypatch, scope)
+        assert client.post(self.RENAME, json={"new_key": "south"}).status_code == 403
+
+    def test_the_community_grant_reaches_the_rename_route(self, monkeypatch):
+        """@verifies REQ-0004
+        @verifies REQ-0079"""
+        client = self._client(monkeypatch, "rec-registry.community.write")
+        assert client.post(self.RENAME, json={"new_key": "south"}).status_code == 418
+

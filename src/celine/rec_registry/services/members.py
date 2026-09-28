@@ -33,16 +33,18 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from celine.rec_registry.core.area_boundary import AREA_KEY_RULE, is_area_key
 from celine.rec_registry.core.errors import ErrorCode
 from celine.rec_registry.db.models import Asset, Community, Member
 from celine.rec_registry.schemas.bundle import (
     AssetCollectionIn,
     DeliveryPointIn,
     MemberIn,
+    TopologyNodeIn,
 )
 
 # Reused rather than reimplemented: the importer already knows how to flatten a
@@ -50,6 +52,7 @@ from celine.rec_registry.schemas.bundle import (
 # indistinguishable from one that arrived in a bundle.
 from celine.rec_registry.services.importer import (
     ASSET_KEY_MAX_LENGTH,
+    build_topology_node,
     too_long_asset_keys,
     _create_assets,
     _extract_device,
@@ -67,6 +70,7 @@ from celine.rec_registry.services.sensors import (
 )
 
 __all__ = [
+    "AreaRenameRefused",
     "AssetKeyTaken",
     "AssetKeyTooLong",
     "CommunityNotFound",
@@ -84,6 +88,7 @@ __all__ = [
     "next_member_key",
     "remove_delivery_point",
     "lock_community",
+    "rename_area",
     "resolve_community",
     "resolve_member",
 ]
@@ -133,6 +138,15 @@ class CommunityNotFound(MemberNotFound):
     """No such community. A ``MemberNotFound`` so existing handlers still catch it."""
 
     code = ErrorCode.COMMUNITY_NOT_FOUND
+
+
+class AreaRenameRefused(Exception):
+    """A rename the registry refuses; ``status`` and ``code`` say why (REQ-0079)."""
+
+    def __init__(self, message: str, status: int, code: ErrorCode):
+        super().__init__(message)
+        self.status = status
+        self.code = code
 
 
 class AssetKeyTaken(Exception):
@@ -253,6 +267,64 @@ async def lock_community(
     )
 
 
+async def rename_area(
+    session: AsyncSession, community: Community, old_key: str, new_key: str
+) -> int:
+    """Move an area from ``old_key`` to ``new_key``, with its members (REQ-0079).
+
+    In the caller's transaction, under the community's row taken exclusively:
+    the stored area — name, boundary, topology and whatever else it carries —
+    is stored under ``new_key``, every member of the
+    community whose ``area`` is ``old_key`` (any status) is moved to
+    ``new_key``, and ``old_key`` is gone. Nothing is committed here. Returns how
+    many members moved.
+
+    The set of boundary ids never changes, so no two areas share one at any
+    moment another transaction can see (REQ-0067); the area is moved as
+    stored, not re-judged. Community row before member rows, the order every
+    write takes them in (``lock_community``): a member write naming an area
+    holds the row shared, so a rename waits for it and then moves that member
+    too, and a member write arriving during a rename waits and then finds
+    ``old_key`` gone (``422 unknown_area``).
+
+    Raises ``AreaRenameRefused``: ``422 invalid_area_key`` for a new key that
+    is not an area key, ``404 area_not_found`` for an ``old_key`` the community
+    does not have, ``409 area_key_taken`` for a ``new_key`` it already has —
+    including ``old_key`` itself.
+    """
+    if not is_area_key(new_key):
+        raise AreaRenameRefused(
+            f"The new area key is not a valid area key: {AREA_KEY_RULE}",
+            422,
+            ErrorCode.INVALID_AREA_KEY,
+        )
+
+    await lock_community(session, community, share=False)
+
+    areas = dict(community.areas or {})
+    if old_key not in areas:
+        raise AreaRenameRefused(
+            f"Area {old_key!r} not found", 404, ErrorCode.AREA_NOT_FOUND
+        )
+    if new_key in areas:
+        raise AreaRenameRefused(
+            f"Area {new_key!r} already exists in this community",
+            409,
+            ErrorCode.AREA_KEY_TAKEN,
+        )
+
+    community.areas = {
+        (new_key if k == old_key else k): v for k, v in areas.items()
+    }
+    moved = await session.execute(
+        update(Member)
+        .where(Member.community_id == community.id, Member.area == old_key)
+        .values(area=new_key)
+        .execution_options(synchronize_session="fetch")
+    )
+    return int(moved.rowcount or 0)
+
+
 # ── key minting ───────────────────────────────────────────────────────────────
 
 
@@ -345,6 +417,37 @@ def remove_delivery_point(
     existing: Sequence[dict[str, Any]], point_id: str
 ) -> list[dict[str, Any]]:
     return [dict(dp) for dp in existing if dp.get("id") != point_id]
+
+
+def merge_topology_node(
+    existing: Sequence[dict[str, Any]], node: TopologyNodeIn
+) -> list[dict[str, Any]]:
+    """Add or replace one topology node, keeping the others (REQ-0072).
+
+    Identity is the node id, as for delivery points (REQ-0027): re-sending a
+    node replaces it where it stands rather than duplicating it, and a new id
+    is appended. A community stored holding one id twice, which REQ-0067 does
+    not allow, keeps one: the first, replaced.
+    """
+    incoming = build_topology_node(node)
+    merged: list[dict[str, Any]] = []
+    placed = False
+    for current in existing:
+        if current.get("id") != node.id:
+            merged.append(dict(current))
+        elif not placed:
+            merged.append(incoming)
+            placed = True
+    if not placed:
+        merged.append(incoming)
+    return merged
+
+
+def remove_topology_node(
+    existing: Sequence[dict[str, Any]], node_id: str
+) -> list[dict[str, Any]]:
+    """Every node but ``node_id``'s, in order (REQ-0072)."""
+    return [dict(n) for n in existing if n.get("id") != node_id]
 
 
 # ── writes ────────────────────────────────────────────────────────────────────

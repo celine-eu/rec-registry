@@ -9,6 +9,7 @@ Commands:
 - lookup: Lookup by user_id or sensor_id
 - duplicate-sensors: Report sensor ids held by more than one active member (read-only)
 - out-of-set-values: Report members whose role, status or area is out of set (read-only)
+- invalid-area-boundaries: Report stored areas breaking the one-substation rule (read-only)
 
 Authentication:
 - Client credentials: --client-id + --client-secret (admin operations)
@@ -28,6 +29,10 @@ import yaml
 
 from celine.sdk.auth import OidcClientCredentialsProvider
 from celine.rec_registry.cli.config import settings
+from celine.rec_registry.core.area_boundary import (
+    area_boundary_refusals,
+    area_key_refusals,
+)
 from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.sensor_id import normalise_sensor_id
 
@@ -1310,6 +1315,147 @@ def out_of_set_values(
     typer.secho(
         f"{len(found)} out-of-set value(s) in "
         f"{len({(c, m) for c, m, _, _ in found})} member(s).",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+# =============================================================================
+# Area Boundary Report
+# =============================================================================
+
+
+def find_invalid_area_boundaries(
+    bundles: list[dict[str, Any]],
+) -> list[tuple[str, str]]:
+    """Every stored area the one-substation rule would now refuse (REQ-0078).
+
+    Reads exported bundles, as ``GET /admin/export`` answers them, and returns
+    ``(community key, refusal)`` sorted, one per rule an area breaks — judged
+    by ``area_boundary_refusals`` over **every** area of the community against
+    its own ``topology``, the check the import runs (REQ-0067), so the report
+    and the check cannot disagree. A key that is not an area key is reported
+    too, by ``area_key_refusals``, which the import also runs. A refusal names
+    area keys and the rule, never a boundary or node id.
+    """
+    found: list[tuple[str, str]] = []
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        community = bundle.get("community") or {}
+        community_key = str(community.get("id", ""))
+        areas = community.get("areas") or {}
+        topology = community.get("topology") or []
+        if not isinstance(areas, dict) or not isinstance(topology, list):
+            continue
+        for detail in area_key_refusals(areas):
+            found.append((community_key, detail))
+        for detail in area_boundary_refusals(areas, topology):
+            found.append((community_key, detail))
+    return sorted(found)
+
+
+@app.command("invalid-area-boundaries")
+def invalid_area_boundaries(
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
+):
+    """
+    Report every stored area that breaks the one-substation rule (read-only).
+
+    The registry refuses an area that is not one GSE primary substation — one
+    boundary, one primary_substation topology node with its id, no two areas
+    on one boundary id — on the area PUT, the topology node routes and the
+    import, and an area key that is not letters, digits, '-' and '_' (at most
+    128, starting with a letter or digit) on the area PUT and the import. It
+    does not re-judge areas stored before the rules, and a re-import of their
+    community is refused. This lists them — one line per broken rule:
+    community key, and the refusal naming the area keys — so they can be
+    corrected (an onboarding registry-sync, an area rename, or a reshaped
+    bundle) before
+    anything relies on the rule.
+
+    Reads every community through GET /admin/export (the export grant) and
+    writes nothing. Exits 0 when there are none, 1 when there are, and 2 when
+    the registry cannot be read.
+    """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    found = find_invalid_area_boundaries(_read_export(api, access_token, timeout))
+    if not found:
+        typer.secho(
+            "Every stored area keeps the one-substation rule and has an area key.",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    typer.echo("community\trefusal")
+    for community_key, detail in found:
+        typer.echo(f"{community_key}\t{detail}")
+    typer.secho(
+        f"{len(found)} area rule(s) broken in "
+        f"{len({c for c, _ in found})} community(ies).",
         fg=typer.colors.YELLOW,
         err=True,
     )

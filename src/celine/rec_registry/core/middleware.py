@@ -259,6 +259,8 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         # Writes are named by what they touch, read from the route's shape:
         #   communities/{ck}                                   community.write
         #   communities/{ck}/areas/{area}                      community.write
+        #   communities/{ck}/areas/{area}/rename   (POST)      community.write
+        #   communities/{ck}/topology/{node_id}                community.write
         #   communities/{ck}/members                           members.write
         #   communities/{ck}/members/{mk}                      members.write | .purge
         #   communities/{ck}/members/{mk}/status               members.write
@@ -266,8 +268,15 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         #   communities/{ck}/members/{mk}/delivery-points/{id} members.write
         #   communities/{ck}/members/{mk}/assets/{ak}          assets.write
         n = len(rest)
-        if n == 2 or (n == 4 and rest[2] == "areas"):
+        if n == 2 or (n == 4 and rest[2] in ("areas", "topology")):
             return "community.write"
+        if n == 5 and rest[2] == "areas" and rest[4] == "rename":
+            # Moves an area's key with its members (REQ-0079): a community
+            # write, as the area routes are. The route is a POST; any other
+            # method on it is no route at all.
+            if method == "POST":
+                return "community.write"
+            return "admin"
         if n >= 3 and rest[2] == "members":
             if n == 3:
                 return "members.write"
