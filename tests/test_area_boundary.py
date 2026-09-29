@@ -587,6 +587,35 @@ class TestTheImport:
         assert r.status_code == 200, r.text
         assert any("0.6" in w for w in r.json()["warnings"])
 
+    @pytest.mark.parametrize("areas", [None, {}], ids=["absent", "empty"])
+    async def test_an_administrative_only_v07_bundle_is_imported(self, live_client, areas):
+        """No areas, no topology, no members: the bundle the schema now accepts
+        is imported, without a warning or a refusal.
+
+        @verifies REQ-0068
+        @verifies REQ-0074"""
+        community = {"id": "admin-rec", "name": "Administrative"}
+        if areas is not None:
+            community["areas"] = areas
+        bundle = {
+            "version": "1.0",
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "community": community,
+            "members": {},
+        }
+
+        dry = await live_client.post("/admin/import", json={"bundle": bundle, "dry_run": True})
+        assert dry.status_code == 200, dry.text
+        assert dry.json()["refusals"] == []
+        assert dry.json()["warnings"] == []
+
+        r = await live_client.post("/admin/import", json={"bundle": bundle})
+
+        assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == []
+        stored = (await live_client.get("/admin/communities/admin-rec")).json()
+        assert stored["areas"] == {}
+
     async def test_a_v06_bundle_with_no_areas_is_imported(self, live_client):
         """@verifies REQ-0068"""
         bundle = {
@@ -800,10 +829,21 @@ class TestTheSchemaIsPublishedAsV07:
         topology = area["properties"]["topology"]
         assert (topology["minItems"], topology["maxItems"]) == (1, 1)
 
+    def test_a_community_needs_no_areas(self):
+        """An administrative-only bundle validates: `areas` is neither required
+        nor bound to a minimum count.
+
+        @verifies REQ-0068"""
+        community = self._schema()["definitions"]["Community"]
+
+        assert community["required"] == ["id", "name"]
+        assert "minProperties" not in community["properties"]["areas"]
+
     def test_nothing_else_changed_from_v06(self):
-        """Only the area, and wording, changed: `description` strings are
-        ignored, so a description corrected in v0.7 (the operators map names
-        the node field `operator_id`) is not a change of shape.
+        """Only the area, the community's `areas` being optional and possibly
+        empty, and wording changed: `description` strings are ignored, so a
+        description corrected in v0.7 (the operators map names the node field
+        `operator_id`) is not a change of shape.
 
         @verifies REQ-0068"""
         old = json.loads((SCHEMAS / "v0.6" / "community.schema.json").read_text())
@@ -812,6 +852,13 @@ class TestTheSchemaIsPublishedAsV07:
             for key in ("$id", "title", "version"):
                 doc.pop(key)
             doc["definitions"].pop("Area")
+
+        # The one change outside the area, stated exactly: v0.6 required
+        # `areas` with at least one entry, v0.7 requires neither.
+        community = old["definitions"]["Community"]
+        assert community["required"] == ["id", "name", "areas"]
+        assert community["properties"]["areas"].pop("minProperties") == 1
+        community["required"].remove("areas")
 
         assert _without_descriptions(new) == _without_descriptions(old)
 

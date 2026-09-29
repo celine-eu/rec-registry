@@ -98,7 +98,7 @@ class TestBundleParsing:
     def test_meter_sensor_id(self, example_bundle):
         """@verifies REQ-0015"""
         meter = example_bundle.members["ah-00001"].assets.meter["meter-ah-00001"]
-        assert meter.sensor_id == "c2g-F00000001"
+        assert meter.sensor_id == "ex-sensor-0001"
         assert meter.meter_type == "consumption"
 
     def test_meter_pod_reference(self, example_bundle):

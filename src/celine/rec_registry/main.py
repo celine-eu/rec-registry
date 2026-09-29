@@ -4,6 +4,7 @@ CELINE REC Registry API - Main application.
 
 from fastapi import FastAPI
 
+from celine.rec_registry.core.access_log import install_access_log_redaction
 from celine.rec_registry.core.errors import install_error_handlers
 from celine.rec_registry.core.middleware import PolicyMiddleware
 from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION, api_version
@@ -43,6 +44,11 @@ def create_app():
 
     # Refusals a caller acts on answer {"detail", "code"} (REQ-0073).
     install_error_handlers(app)
+
+    # uvicorn's access line prints the path, which carries asset keys
+    # (`meter-<sensor_id>`), sensor, user and delivery-point ids: the line
+    # keeps its shape, not the ids (REQ-0080).
+    install_access_log_redaction()
 
     # Include routers
     app.include_router(user_router)

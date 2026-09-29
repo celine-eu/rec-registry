@@ -35,7 +35,7 @@ A registry manifest is a single YAML file that provides the authoritative descri
 
 ## `community`
 
-Required fields: `id`, `name`, `areas`.
+Required fields: `id`, `name`. `areas` is optional and may be empty, so an **administrative-only** bundle — the community's own data, with no areas, no topology and no members yet — is a valid v0.7 file; its areas are added later, by area writes or a later import.
 
 | Field | Description |
 |---|---|
@@ -211,7 +211,7 @@ Assets are organized by type. Each type is a dict keyed by a stable asset ID.
 | Field | Required | Description |
 |---|---|---|
 | `name` | yes | Display name |
-| `sensor_id` | yes | CELINE data pipeline sensor identifier (e.g. `c2g-57CFBC3F0`) |
+| `sensor_id` | yes | CELINE data pipeline sensor identifier (e.g. `ex-sensor-0001`) |
 | `meter_type` | yes | `consumption` \| `production` \| `bidirectional` \| `import` \| `export` |
 | `pod` | no | Reference to delivery point `id` |
 | `device` | no | Device specification (type, model, serial\_number, mac\_address) |
@@ -279,8 +279,9 @@ Assets are organized by type. Each type is a dict keyed by a stable asset ID.
 | `area.boundary` added, required | `{source: gse_cabine_primarie, id: <cod_ac>}`: the primary-substation boundary the area is |
 | `area.topology` required, exactly one item | The one node is a `primary_substation` whose id equals `boundary.id` |
 | One area per substation | No two areas of one community reference the same `boundary.id` |
+| `community.areas` optional, may be empty | Required with at least one area since v0.5; an administrative-only bundle now validates. The importer never required it |
 
-**A v0.6 file with areas is not a valid v0.7 file**: none of its areas carries a boundary, and an area may list several nodes. The import refuses it on content, whatever version it declares, and there is no compatibility branch: an old file is reshaped outside the product before it restores. A v0.6 file with no areas is a valid v0.7 one. The v0.4 note below that removed the "exactly one primary substation" constraint is reversed here, per area rather than per community: a community may still span several substations, one area each.
+**A v0.6 file with areas is not a valid v0.7 file**: none of its areas carries a boundary, and an area may list several nodes. The import refuses it on content, whatever version it declares, and there is no compatibility branch: an old file is reshaped outside the product before it restores. A file with no areas — `areas` absent or `{}` — is a valid v0.7 one (it was never a valid v0.5 or v0.6 one, which required at least one area, though the importer accepted it). The v0.4 note below that removed the "exactly one primary substation" constraint is reversed here, per area rather than per community: a community may still span several substations, one area each.
 
 ## Changes from v0.5
 

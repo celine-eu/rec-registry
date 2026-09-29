@@ -74,6 +74,12 @@ community:
       parent: "AC000E00001"
       operator_id: example-dso
 
+# The sensor ids below (ex-sensor-0001 ...) are synthetic on purpose. A sensor
+# has one holder across all communities, so a fixture that reused real device
+# ids would block any other local community that holds those devices. The cost:
+# no local data source emits these ids, so the dashboards show no readings for
+# these members. Give a member a real device locally (a meter attach or a
+# local-only bundle), never here.
 members:
   ah-00001:
     user_id: "ah-00001"
@@ -94,7 +100,7 @@ members:
       meter:
         meter-ah-00001:
           name: Meter AH-00001
-          sensor_id: c2g-F00000001
+          sensor_id: ex-sensor-0001
           meter_type: consumption
           pod: "POD-8KQ2M7T1V6ZN"
           device:
@@ -126,7 +132,7 @@ members:
       meter:
         meter-ah-00002:
           name: Meter AH-00002
-          sensor_id: c2g-F00000002
+          sensor_id: ex-sensor-0002
           meter_type: bidirectional
           pod: "POD-3MV8TL1ZP6NQ"
           device:
@@ -168,7 +174,7 @@ members:
       meter:
         meter-ah-00003:
           name: Meter AH-00003
-          sensor_id: c2g-F00000003
+          sensor_id: ex-sensor-0003
           meter_type: bidirectional
           pod: "POD-5XT0MQ7VL2NR"
           device:
@@ -195,7 +201,7 @@ members:
       meter:
         meter-ah-00004:
           name: Meter AH-00004
-          sensor_id: c2g-F00000004
+          sensor_id: ex-sensor-0004
           meter_type: consumption
           pod: "POD-7QS1PX4MT9ZB"
           device:

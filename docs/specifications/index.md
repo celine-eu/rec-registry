@@ -106,12 +106,12 @@ reports planned requirements as unverified.
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
 | REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
-| REQ-0054 – REQ-0058, REQ-0076 – REQ-0078 | [operability](operability.md) — the CLI, health, version |
+| REQ-0054 – REQ-0058, REQ-0076 – REQ-0078, REQ-0080 | [operability](operability.md) — the CLI, health, version, the access log |
 
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
-same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0079.
+same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080.
 
 ## What is not covered
 

@@ -277,7 +277,9 @@ makes it the only one, so the reading is right rather than lucky. Decided in
 
 `schemas/community/v0.7/community.schema.json` adds `Area.boundary` — required, `{source, id}`,
 `source` one of `gse_cabine_primarie`, no other key — and makes `Area.topology` required with
-exactly one item, and changes nothing else. The equality of that item with `boundary.id`, the
+exactly one item, makes `community.areas` optional and allows it empty — so an
+administrative-only bundle (the community's own data, no areas) validates, as the importer
+already accepted it — and changes nothing else. The equality of the topology item with `boundary.id`, the
 node's type and uniqueness across areas are not expressible in JSON Schema; REQ-0067 enforces
 them. `CURRENT_SCHEMA_VERSION` is `0.7`, `KNOWN_SCHEMA_VERSIONS` gains it, and so do `/version`,
 an export's `schema_version` and the bundle schema named in the OpenAPI description. The
@@ -285,7 +287,8 @@ package version is 1.6.0, the one this delivery moved to from the last release (
 SDK's snapshot of this API named after `info.version` (REQ-0058) is a new one rather than an
 overwrite of a released one.
 
-A v0.6 file with no areas stays a valid v0.7 one; a v0.6 file with areas is not, since none of
+A file with no areas (`areas` absent or `{}`) is a valid v0.7 one, and the import accepts it
+whatever version it declares; a v0.6 file with areas is not, since none of
 its areas carries a boundary — the import refuses it on content whatever it declares, and
 imports a v0.6 file whose areas keep REQ-0067 with the version warning (REQ-0018, REQ-0074).
 Like every published schema it is documentation, not enforced (REQ-0018). Decided in

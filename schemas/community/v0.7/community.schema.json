@@ -65,8 +65,7 @@
       "type": "object",
       "required": [
         "id",
-        "name",
-        "areas"
+        "name"
       ],
       "additionalProperties": true,
       "properties": {
@@ -104,11 +103,10 @@
         },
         "areas": {
           "type": "object",
-          "description": "Regulatory coverage areas within the community (Italian Decreto 199/2021: GSE cabine primarie service zones defining virtual self-consumption eligibility). Keyed by area ID. These are administrative/regulatory boundaries, not electrical grid concepts — use area.topology to reference the grid nodes that serve this area.",
+          "description": "Regulatory coverage areas within the community (Italian Decreto 199/2021: GSE cabine primarie service zones defining virtual self-consumption eligibility). Keyed by area ID. These are administrative/regulatory boundaries, not electrical grid concepts — use area.topology to reference the grid nodes that serve this area. Optional and may be empty: an administrative-only bundle (the community's own data, no areas) is valid, and its areas are added later.",
           "additionalProperties": {
             "$ref": "#/definitions/Area"
-          },
-          "minProperties": 1
+          }
         },
         "topology": {
           "type": "array",

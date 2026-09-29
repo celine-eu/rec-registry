@@ -173,7 +173,7 @@ Assets are organized by type. Each type is a dict keyed by a stable asset ID.
 | Field | Required | Description |
 |---|---|---|
 | `name` | yes | Display name |
-| `sensor_id` | yes | CELINE data pipeline sensor identifier (e.g. `c2g-57CFBC3F0`) |
+| `sensor_id` | yes | CELINE data pipeline sensor identifier (e.g. `ex-sensor-0001`) |
 | `meter_type` | yes | `consumption` \| `production` \| `bidirectional` \| `import` \| `export` |
 | `pod` | no | Reference to delivery point `id` |
 | `device` | no | Device specification (type, model, serial\_number, mac\_address) |
