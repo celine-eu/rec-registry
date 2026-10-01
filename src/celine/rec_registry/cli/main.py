@@ -8,6 +8,7 @@ Commands:
 - tree: Show community structure
 - lookup: Lookup by user_id or sensor_id
 - duplicate-sensors: Report sensor ids held by more than one active member (read-only)
+- duplicate-delivery-points: Report delivery points held by more than one active member (read-only)
 - out-of-set-values: Report members whose role, status or area is out of set (read-only)
 - invalid-area-boundaries: Report stored areas breaking the one-substation rule (read-only)
 
@@ -33,6 +34,7 @@ from celine.rec_registry.core.area_boundary import (
     area_boundary_refusals,
     area_key_refusals,
 )
+from celine.rec_registry.core.delivery_point_id import normalise_delivery_point_id
 from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.sensor_id import normalise_sensor_id
 
@@ -1172,6 +1174,151 @@ def duplicate_sensors(
             typer.echo(f"{sensor_id}\t{community_key}\t{member_key}\t{len(held_by)}")
     typer.secho(
         f"{len(duplicates)} sensor id(s) held by more than one active member.",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+# =============================================================================
+# Duplicate Delivery Points Report
+# =============================================================================
+
+
+def find_duplicate_delivery_points(
+    bundles: list[dict[str, Any]],
+) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Every delivery point held by more than one active member (REQ-0086).
+
+    Reads exported bundles, as `GET /admin/export` answers them, and returns
+    ``(delivery point, [(community key, member key), …])`` sorted by point.
+    Only an ``active`` member holds a point (REQ-0085), and ids are compared
+    trimmed and lower-cased — by ``normalise_delivery_point_id``, the
+    registry's own definition — so ` IT001E…`, `it001e…` and `IT001E…` are one,
+    reported in that compared form. A member listing one point twice is one
+    holder, not two.
+    """
+    holders: dict[str, set[tuple[str, str]]] = {}
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        community_key = str((bundle.get("community") or {}).get("id", ""))
+        for member_key, member in (bundle.get("members") or {}).items():
+            if not isinstance(member, dict) or member.get("status") != "active":
+                continue
+            for point in member.get("delivery_points") or []:
+                if not isinstance(point, dict):
+                    continue
+                point_id = normalise_delivery_point_id(point.get("id"))
+                if point_id:
+                    holders.setdefault(point_id, set()).add(
+                        (community_key, str(member_key))
+                    )
+    return [
+        (point_id, sorted(held_by))
+        for point_id, held_by in sorted(holders.items())
+        if len(held_by) > 1
+    ]
+
+
+@app.command("duplicate-delivery-points")
+def duplicate_delivery_points(
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
+):
+    """
+    Report every delivery point (POD) held by more than one active member (read-only).
+
+    The registry refuses the next write that would make a second active holder
+    of a delivery point (REQ-0085) — including a re-send of either holder's
+    point, a reactivation of either, and a re-import of either community — but
+    it does not repair holders that already exist. This lists them — one line
+    per holder: the delivery point (trimmed and lower-cased, the form the
+    registry compares), community key, member key, and how many active members
+    hold it — so an operator can resolve them before the check blocks either.
+
+    Reads every community through GET /admin/export (the export grant) and
+    writes nothing. Exits 0 when there are none, 1 when there are, and 2 when
+    the registry cannot be read.
+    """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    bundles = _read_export(api, access_token, timeout)
+
+    duplicates = find_duplicate_delivery_points(bundles)
+    if not duplicates:
+        typer.secho(
+            "No delivery point is held by more than one active member.",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    typer.echo("delivery_point\tcommunity\tmember\tactive_holders")
+    for point_id, held_by in duplicates:
+        for community_key, member_key in held_by:
+            typer.echo(f"{point_id}\t{community_key}\t{member_key}\t{len(held_by)}")
+    typer.secho(
+        f"{len(duplicates)} delivery point(s) held by more than one active member.",
         fg=typer.colors.YELLOW,
         err=True,
     )

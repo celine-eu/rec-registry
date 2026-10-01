@@ -40,6 +40,7 @@ from typing import Any
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from celine.rec_registry.core.delivery_point_id import normalise_delivery_point_id
 from celine.rec_registry.core.sensor_id import WHITESPACE
 
 __all__ = [
@@ -77,17 +78,6 @@ class DeliveryPointHolding:
     community_id: uuid.UUID
     member_id: uuid.UUID
     member_key: str
-
-
-def normalise_delivery_point_id(value: Any) -> str | None:
-    """The compared form of a delivery-point id: trimmed, lower-cased, ``None`` when blank.
-
-    Comparison only — the id is stored as the caller spelled it.
-    """
-    if not isinstance(value, str):
-        return None
-    trimmed = value.strip(WHITESPACE).lower()
-    return trimmed or None
 
 
 def member_delivery_point_ids(points: Sequence[dict[str, Any]] | None) -> list[str]:

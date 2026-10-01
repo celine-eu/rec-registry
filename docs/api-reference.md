@@ -473,6 +473,13 @@ transaction it adds `new`, removes `old` and relinks the member's meters whose
 delivery_point_linked`: correct it with `replaces`, or detach the meter, first. An
 unknown point is `404`.
 
+**Duplicates already stored** are not repaired by the check; an operator lists them with
+`celine-rec-registry duplicate-delivery-points` — a read-only CLI report over
+`GET /admin/export` (the export grant), one tab-separated line per active holder:
+`delivery_point  community  member  active_holders`, the point trimmed and lower-cased; exit
+`0` none, `1` some, `2` unreadable. There is no HTTP route for it, as there is none for
+`duplicate-sensors`.
+
 ### `PUT|DELETE /admin/communities/{ck}/members/{mk}/assets/{asset_key}`
 
 Create, replace or remove one asset. `properties` is validated against the model

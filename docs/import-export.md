@@ -219,6 +219,7 @@ community would now be refused on:
 
 ```bash
 celine-rec-registry duplicate-sensors   # sensors held twice; read-only; exits 1 when any exist
+celine-rec-registry duplicate-delivery-points  # PODs held twice (trimmed, case-insensitive); read-only; exits 1 when any exist
 celine-rec-registry out-of-set-values   # role, status or area out of set; read-only; exits 1 when any exist
 celine-rec-registry invalid-area-boundaries  # areas breaking the one-substation rule or the area-key rule; read-only; exits 1 when any exist
 ```

@@ -72,6 +72,7 @@ celine-rec-registry tree --community example_rec
 celine-rec-registry lookup-user --user-id <id>
 celine-rec-registry lookup-sensor --sensor-id <id>
 celine-rec-registry duplicate-sensors                              # read-only; exits 1 if a sensor has two active holders
+celine-rec-registry duplicate-delivery-points                      # read-only; exits 1 if a POD has two active holders
 celine-rec-registry out-of-set-values                              # read-only; exits 1 if a role, status or area is out of set
 celine-rec-registry invalid-area-boundaries                        # read-only; exits 1 if a stored area breaks the one-substation or area-key rule
 ```

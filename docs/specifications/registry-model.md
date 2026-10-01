@@ -380,7 +380,8 @@ run lists it in `refusals`.
 **Existing duplicates are not repaired, and do not block unrelated writes.** The check
 refuses the next write that would make one, not the past ones; a duplicate already stored
 blocks re-sending either holder's point, reactivating either holder, and re-importing either
-community, until it is resolved. No report lists them yet.
+community, until it is resolved. `celine-rec-registry duplicate-delivery-points` lists them
+(REQ-0086).
 
 A mistyped POD that happens to be somebody else's is the case this catches: two holders would
 attribute one supply to two people in every consumer that joins supply to members. Decided

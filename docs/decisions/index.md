@@ -50,3 +50,4 @@ edited to say something else.
 | [ADR-0010](ADR-0010-an-area-is-renamed-with-its-members-in-one-write.md) | an area is renamed with its members in one write, under the community's lock |
 | [ADR-0011](ADR-0011-member-writes-are-granted-per-field.md) | a member's fields are written through per-field routes, each with its own grant |
 | [ADR-0012](ADR-0012-a-delivery-point-has-one-active-holder-and-is-corrected-in-one-write.md) | a delivery point has one active holder across the registry, and is corrected in one write |
+| [ADR-0013](ADR-0013-duplicate-delivery-points-are-reported-to-the-operator.md) | delivery points already held twice are reported to the operator, as sensors are |

@@ -88,6 +88,30 @@ does not repair holders that already exist, and nothing else would find them: ev
 path now refuses to create one. This is the report ADR-0004 asks to run before the check is
 relied on. It issues one `GET` and no other request.
 
+### REQ-0086 — the CLI reports delivery points held by more than one active member, and writes nothing
+
+`celine-rec-registry duplicate-delivery-points` reads every community through
+`GET /admin/export` and prints one line per holder of each delivery point that more than one
+**active** member holds, in any communities, under the header
+`delivery_point	community	member	active_holders` (tab-separated): the point in its compared
+form — trimmed and lower-cased exactly as the registry compares it (REQ-0085), so ` IT001E…`,
+`it001e…` and `IT001E…` are one point — the community key, the member key, and how many active
+members hold it. A member listing one point twice is one holder; a member that is not
+`active` holds nothing; a blank or malformed point is skipped. It exits `0` when there are
+none, `1` when there are, and `2` when the registry cannot be read — so an unreadable registry
+is never reported as clean. It issues one `GET` and no other request, and prints no name,
+`user_id` or other personal field beyond the point itself.
+
+It is REQ-0076's report for delivery points, with the same reach: the export grant, which
+reads every community, because a clash across communities is the one no community's manager
+can see. The registry refuses the next write that would make a second active holder
+(REQ-0085) — including a re-send of either holder's point, a reactivation of either, and a
+re-import of either community — but does not repair holders already stored; this is how an
+operator finds them and resolves each, with a correction (REQ-0084) or a deactivation, before
+the check blocks either. Decided in
+[ADR-0013](../decisions/ADR-0013-duplicate-delivery-points-are-reported-to-the-operator.md),
+which amends ADR-0012.
+
 ### REQ-0077 — the CLI reports members whose role, status or area is out of set, and writes nothing
 
 `celine-rec-registry out-of-set-values` reads every community through `GET /admin/export` and

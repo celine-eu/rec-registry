@@ -371,6 +371,166 @@ class TestDuplicateSensorsCommand:
 
 
 # =============================================================================
+# duplicate-delivery-points — the read-only report of PODs held twice (REQ-0086)
+# =============================================================================
+
+
+def _dp_doc(community: str, members: dict) -> dict:
+    return {
+        "community": {"id": community, "name": community},
+        "members": {
+            key: {
+                "status": status,
+                "delivery_points": [{"id": pod, "type": "pod"} for pod in pods],
+            }
+            for key, (status, pods) in members.items()
+        },
+    }
+
+
+POD = "IT001E00000001"
+
+
+class TestFindDuplicateDeliveryPoints:
+    def test_a_point_held_by_two_active_members_across_communities(self):
+        """Compared trimmed and case-insensitively, reported in that form.
+
+        @verifies REQ-0086
+        """
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        docs = [
+            _dp_doc("example-rec-a", {"ex-00001": ("active", [POD])}),
+            _dp_doc("example-rec-b", {"ex-00009": ("active", [f" {POD.lower()}\t"])}),
+            _dp_doc("example-rec-c", {"ex-00005": ("active", [f"\u00a0{POD}"])}),
+        ]
+
+        assert find_duplicate_delivery_points(docs) == [
+            (
+                POD.lower(),
+                [
+                    ("example-rec-a", "ex-00001"),
+                    ("example-rec-b", "ex-00009"),
+                    ("example-rec-c", "ex-00005"),
+                ],
+            )
+        ]
+
+    def test_two_holders_in_one_community_are_listed_too(self):
+        """@verifies REQ-0086"""
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        docs = [
+            _dp_doc(
+                "example-rec",
+                {"ex-00001": ("active", [POD]), "ex-00002": ("active", [POD])},
+            )
+        ]
+
+        assert find_duplicate_delivery_points(docs) == [
+            (POD.lower(), [("example-rec", "ex-00001"), ("example-rec", "ex-00002")])
+        ]
+
+    def test_members_who_are_not_active_hold_nothing(self):
+        """@verifies REQ-0086"""
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        docs = [
+            _dp_doc(
+                "example-rec",
+                {
+                    "ex-00001": ("active", [POD]),
+                    "ex-00002": ("inactive", [POD]),
+                    "ex-00003": ("pending", [POD]),
+                    "ex-00004": ("suspended", [POD]),
+                },
+            )
+        ]
+
+        assert find_duplicate_delivery_points(docs) == []
+
+    def test_one_member_listing_a_point_twice_is_one_holder(self):
+        """@verifies REQ-0086"""
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        docs = [_dp_doc("example-rec", {"ex-00001": ("active", [POD, POD.lower()])})]
+
+        assert find_duplicate_delivery_points(docs) == []
+
+    def test_blank_and_malformed_points_are_skipped(self):
+        """@verifies REQ-0086"""
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        docs = [
+            _dp_doc("example-rec", {"ex-00001": ("active", ["  "]), "ex-00002": ("active", [" "])}),
+            {"community": {"id": "x"}, "members": {"m": {"status": "active", "delivery_points": ["bad", None, {"id": 7}]}}},
+            "not a bundle",
+        ]
+
+        assert find_duplicate_delivery_points(docs) == []
+
+
+class TestDuplicateDeliveryPointsCommand:
+    def _run(self, text: str, status: int = 200):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.text = text
+        get = MagicMock(return_value=resp)
+        post = MagicMock()
+        with patch(HTTPX_GET, get), patch(HTTPX_POST, post):
+            result = runner.invoke(
+                app, ["duplicate-delivery-points", "--token", "fake-jwt-token"]
+            )
+        return result, get, post
+
+    def test_no_duplicates_exits_zero(self):
+        """@verifies REQ-0086"""
+        import yaml
+
+        text = yaml.safe_dump(_dp_doc("example-rec", {"ex-00001": ("active", [POD])}))
+        result, _, _ = self._run(text)
+
+        assert result.exit_code == 0, result.output
+        assert "No delivery point" in result.output
+
+    def test_duplicates_are_listed_one_line_per_holder_and_exit_non_zero(self):
+        """@verifies REQ-0086"""
+        import yaml
+
+        text = yaml.safe_dump_all(
+            [
+                _dp_doc("example-rec-a", {"ex-00001": ("active", [POD])}),
+                _dp_doc("example-rec-b", {"ex-00009": ("active", [POD.lower()])}),
+            ]
+        )
+        result, _, _ = self._run(text)
+
+        assert result.exit_code == 1, result.output
+        assert "delivery_point\tcommunity\tmember\tactive_holders" in result.output
+        assert f"{POD.lower()}\texample-rec-a\tex-00001\t2" in result.output
+        assert f"{POD.lower()}\texample-rec-b\tex-00009\t2" in result.output
+
+    def test_it_only_reads_the_export(self):
+        """One GET of `/admin/export`, no other request.
+
+        @verifies REQ-0086
+        """
+        result, get, post = self._run("")
+
+        assert result.exit_code == 0, result.output
+        get.assert_called_once()
+        assert get.call_args.args[0].endswith("/admin/export")
+        assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer fake-jwt-token"
+        post.assert_not_called()
+
+    def test_an_unreadable_registry_is_not_reported_as_clean(self):
+        """@verifies REQ-0086"""
+        result, _, _ = self._run('{"detail": "Forbidden"}', status=403)
+
+        assert result.exit_code == 2
+
+
+# =============================================================================
 # invalid-area-boundaries — the read-only report of areas breaking REQ-0067
 # =============================================================================
 

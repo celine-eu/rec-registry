@@ -628,6 +628,70 @@ class TestTheImport:
 
 
 # =============================================================================
+# F7: the report of duplicates already stored (REQ-0086)
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestTheDuplicatesReportAgainstAnExport:
+    async def test_it_finds_holders_written_before_the_check(
+        self, live_client, pg_engine
+    ):
+        """The check refuses the next write, not the past ones: rows that
+        already break the rule are what the report exists to find, across
+        communities, compared trimmed and case-insensitively.
+
+        @verifies REQ-0086
+        """
+        import yaml
+
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        await _community(live_client, "example-rec-a")
+        await _community(live_client, "example-rec-b")
+        await _add(live_client, "ex-00001", 1, community="example-rec-a", pods=[OLD])
+        await _add(
+            live_client,
+            "ex-00009",
+            9,
+            community="example-rec-b",
+            pods=[f" {OLD.lower()}"],
+            status="pending",
+        )
+        await _add(
+            live_client,
+            "ex-00008",
+            8,
+            community="example-rec-b",
+            pods=[OLD],
+            status="inactive",
+        )
+        # As if written before the rule existed: ex-00009 becomes active
+        # without the reactivation check; ex-00008 stays inactive.
+        async with pg_engine.begin() as conn:
+            await conn.execute(
+                text("update member set status = 'active' where key = 'ex-00009'")
+            )
+
+        exported = await live_client.get("/admin/export")
+        assert exported.status_code == 200, exported.text
+        docs = [d for d in yaml.safe_load_all(exported.text) if d]
+
+        assert find_duplicate_delivery_points(docs) == [
+            (
+                OLD.lower(),
+                [("example-rec-a", "ex-00001"), ("example-rec-b", "ex-00009")],
+            )
+        ]
+        # And the writes it warns about are the ones F6 now refuses.
+        r = await live_client.post(
+            "/admin/communities/example-rec-b/members/ex-00008/status",
+            json={"status": "active"},
+        )
+        _refusal(r, 409, "delivery_point_held")
+
+
+# =============================================================================
 # Two writers at once
 # =============================================================================
 

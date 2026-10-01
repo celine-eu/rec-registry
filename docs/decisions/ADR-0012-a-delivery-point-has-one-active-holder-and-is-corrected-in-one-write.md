@@ -1,7 +1,7 @@
 # ADR-0012 — a delivery point has one active holder across the registry, and is corrected in one write
 
 **Date:** 2026-10-01
-**Status:** accepted
+**Status:** accepted; amended by ADR-0013
 
 ## Context
 
