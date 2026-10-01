@@ -17,7 +17,8 @@ everything after ``/delivery-points/by-id/`` or
 ``community-by-delivery-point/``, and the segment after a member's
 ``/delivery-points/``, becomes ``{dp_id}``. The ``cursor`` of the asset, meter
 and delivery-point listings (an asset key or a delivery-point id), and any
-``sensor_id``, ``user_id`` or delivery-point id query value, becomes
+``sensor_id``, ``user_id`` or delivery-point id query value (``replaces``
+among them), becomes
 ``{redacted}``. Method, route shape and status are kept. The markers are fixed
 rather than a hash: these ids are few, and a hash of one is reversible by
 trying them.
@@ -68,6 +69,8 @@ _ALWAYS_REDACTED_PARAMS = frozenset(
         "dp_ids",
         "delivery_point_id",
         "delivery_point_ids",
+        # `PUT …/delivery-points/{new}?replaces={old}` (REQ-0084): the old POD.
+        "replaces",
     }
 )
 

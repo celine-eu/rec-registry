@@ -569,6 +569,44 @@ class MemberProfilePatch(BaseModel):
         return self
 
 
+class MemberNamePut(BaseModel):
+    """A member's name, and nothing else (`PUT …/members/{key}/name`, REQ-0083).
+
+    The one key is required and may not be `null`; any other key is `422`, so
+    the narrow `members.name.write` grant cannot carry an identity rewrite.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="The member's display name.")
+
+
+class MemberRolePut(BaseModel):
+    """A member's role, and nothing else (`PUT …/members/{key}/role`, REQ-0083).
+
+    Checked against its set by the route, with the coded `422 invalid_role`
+    the general `PATCH` answers (REQ-0066), not here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(
+        description="One of consumer, prosumer, producer, operator, admin."
+    )
+
+
+class MemberAreaPut(BaseModel):
+    """A member's area, and nothing else (`PUT …/members/{key}/area`, REQ-0083).
+
+    Checked against the community's areas by the route, with the coded
+    `422 unknown_area` the general `PATCH` answers (REQ-0066), not here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    area: str = Field(description="A key of the community's `areas`.")
+
+
 class MemberStatusChange(BaseModel):
     """Move a member through `pending → active → suspended → inactive`."""
 

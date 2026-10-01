@@ -30,6 +30,11 @@ permission and a service that does one has no business doing the other.
 `members.write`. The method set is closed deliberately: a new verb that fell through the
 match would be authorised as a read.
 
+The member's sub-routes are named apart: `…/profile` (REQ-0063), the field routes and the
+delivery-point routes (REQ-0081) derive their own actions, and `…/status` stays
+`members.write`. A delivery point sits under the member path and not under `/assets`, so
+it is never an asset write.
+
 ### REQ-0003 — an asset path is an asset write, even though it contains `/members`
 
 `/admin/communities/{ck}/members/{mk}/assets/{ak}` derives `assets.write`, not
@@ -108,8 +113,9 @@ so that adding one cannot inherit the purge action by accident.
 
 The shared scope matcher in `../celine-sdk` treats a held scope ending `.admin` as
 covering every action of that service, so `rec-registry.admin` satisfies `read`,
-`members.write`, `members.profile.write`, `members.purge`, `assets.write`, `community.write`,
-`import`, `export`, `lookup` and `assets.lookup`.
+`members.write`, `members.profile.write`, `members.name.write`, `members.role.write`,
+`members.area.write`, `members.delivery_points.write`, `members.purge`, `assets.write`,
+`community.write`, `import`, `export`, `lookup` and `assets.lookup`.
 
 This is what made the fine-grained actions backwards compatible: every token that worked
 before they existed still works. The property is pinned by reading
@@ -121,26 +127,28 @@ service account; grant the actions it calls.
 
 ### REQ-0010 — every action name has a rule in the Rego bundle
 
-`policies/celine/rec_registry/access.rego` carries a rule for each of the eleven action
-names `_get_admin_action` can return: the ten grants, and `admin`, which a path matching no
-route derives (REQ-0065) and only `rec-registry.admin` satisfies. An action derived by the middleware with no
+`policies/celine/rec_registry/access.rego` carries a rule for each of the fifteen action
+names `_get_admin_action` can return: the fourteen grants, and `admin`, which a path matching
+no route derives (REQ-0065) and only `rec-registry.admin` satisfies. An action derived by the middleware with no
 corresponding rule would be denied by default — a fail-closed outcome, but one that
 presents as an unexplained `403` in production rather than as anything a test would catch.
 
-So the bundle is read and checked for all eleven, rather than the actions being exercised
+So the bundle is read and checked for all fifteen, rather than the actions being exercised
 one at a time. `assets.lookup` is the one that shows why this is checked as a set: it was
 added to the middleware and to the bundle together but left out of the list being checked,
 so for a while the check passed while covering eight of nine.
 
 `members.profile.write` (REQ-0063, REQ-0064) joined the set in the same change as the
-middleware and the bundle, as every addition must.
+middleware and the bundle, as every addition must, and so did the four field actions of
+REQ-0081.
 
 ### REQ-0063 — the member profile route derives `members.profile.write`, and no other member route does
 
 `PATCH /admin/communities/{ck}/members/{mk}/profile` derives **`members.profile.write`**.
 Every other mutating request on a member path keeps deriving `members.write` (REQ-0002), or
-`members.purge` (REQ-0006), exactly as today — including the general `PATCH …/members/{mk}`,
-which still accepts `role` and `area`. Any other method on the profile path matches no route
+`members.purge` (REQ-0006) — including the general `PATCH …/members/{mk}`, which still
+accepts `role` and `area` — except the field and delivery-point routes, which derive the
+actions of REQ-0081. Any other method on the profile path matches no route
 and derives `admin` (REQ-0065); a read of it is a read (REQ-0001).
 
 The route exists so that a service correcting a member's role and area — a community
@@ -188,6 +196,55 @@ It was the first change of the set, landed before REQ-0071 wrote caller-supplied
 `meter-<sensor id>` keys. Decided in
 [ADR-0003](../decisions/ADR-0003-role-and-area-have-their-own-route-and-action.md).
 
+### REQ-0081 — a member's name, role, area and delivery points each derive their own action
+
+One route per field group, one action per route:
+
+| Route | Action |
+|---|---|
+| `PUT …/members/{mk}/name` | `members.name.write` |
+| `PUT …/members/{mk}/role` | `members.role.write` |
+| `PUT …/members/{mk}/area` | `members.area.write` |
+| `PUT` and `DELETE …/members/{mk}/delivery-points/{id}` | `members.delivery_points.write` |
+
+The delivery-point path segment is hyphenated; the action and its scope use an underscore.
+Any other method on these routes matches no route and derives `admin` (REQ-0065); a read is a
+read (REQ-0001). A segment after the member key that is not in the middleware's list
+(`_MEMBER_FIELD_ROUTES`) — `email`, `did`, `user_id` — derives `admin` too: identity fields
+have no narrow route, and creating a member, the general `PATCH`, `…/status` and a member
+`DELETE` stay `members.write` (REQ-0002); `PATCH …/profile` stays `members.profile.write`
+(REQ-0063).
+
+**Derived from the route's fixed segments and the method, never from the body or the
+query.** `?replaces=` on the delivery-point `PUT` (REQ-0084) and `?purge=` on it change
+nothing. A member key, delivery-point id or any other caller-supplied segment equal to
+`name`, `role`, `area`, `delivery-points` or `profile` derives what a plain id derives
+(REQ-0065): `PUT …/members/name` is `members.write`, `PUT …/members/name/role` is
+`members.role.write`. Pinned by derivation tests over every route and method, and by the
+hostile-id tests. Decided in
+[ADR-0011](../decisions/ADR-0011-member-writes-are-granted-per-field.md).
+
+### REQ-0082 — each field action is satisfied by its own scope and the grants that already wrote that field
+
+`policies/celine/rec_registry/access.rego` allows:
+
+| Action | Scopes |
+|---|---|
+| `members.name.write` | `rec-registry.members.name.write`, `rec-registry.members.write`, `rec-registry.admin` |
+| `members.role.write` | `rec-registry.members.role.write`, `rec-registry.members.profile.write`, `rec-registry.members.write`, `rec-registry.admin` |
+| `members.area.write` | `rec-registry.members.area.write`, `rec-registry.members.profile.write`, `rec-registry.members.write`, `rec-registry.admin` |
+| `members.delivery_points.write` | `rec-registry.members.delivery_points.write`, `rec-registry.members.write`, `rec-registry.admin` |
+
+Each superset is the set of grants that could already write the field before its route
+existed — `members.write` through the general `PATCH` and the delivery-point routes,
+`members.profile.write` through `PATCH …/profile` — so no caller loses a write. A field scope
+alone reaches its own route and nothing else: a caller holding only
+`rec-registry.members.area.write` changes an area and is refused a name, a role, a
+delivery-point `PUT` (with or without `replaces`) or `DELETE`, the general `PATCH`, the
+profile route, the status route and a create. As for REQ-0064, the supersets live in the
+policy rules and not in the shared matcher. Pinned by requests through the middleware with the
+policy engine on, for every scope against every member write.
+
 ---
 
 ## What is not verified here
@@ -199,7 +256,8 @@ It was the first change of the set, landed before REQ-0071 wrote caller-supplied
   `POLICIES_ENABLED=false`.
 - **Which community a write reaches.** Every grant is registry-wide: a holder of
   `rec-registry.assets.write` can write any community's assets, and a holder of
-  `rec-registry.members.profile.write` (REQ-0063) any community's members. Keeping a manager
+  `rec-registry.members.profile.write` (REQ-0063) or a field scope (REQ-0081) any community's
+  members. Keeping a manager
   to their own community is the calling dashboard's policy, and nothing here checks it.
 - **The Keycloak realm.** Operators are authorised by organization and group against state
   `../celine-policies` owns and syncs. There is no import to grep for and nothing here

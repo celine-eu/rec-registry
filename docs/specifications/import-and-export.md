@@ -112,6 +112,9 @@ A bundle is refused, and nothing is deleted or inserted, when:
   current rows do not count, since the import deletes them;
 - an asset key is longer than the 128 characters `asset.key` holds — `asset_key_too_long`
   (REQ-0028), implemented with the sensor clause;
+- two of its active members hold the same delivery point, or one of them holds a point an
+  active member of **another** community holds — `delivery_point_held` (REQ-0085), as the
+  sensor clause, reported by member key and never by the point's id;
 - a member's `role` or `status` is outside its set, or its `area` is not one of the bundle's
   areas (REQ-0066);
 - an area's key is not an area key — `invalid_area_key` (REQ-0067), one refusal per key;
@@ -138,7 +141,7 @@ one refusal, `member '<key>': role 'x' is not one of …`, the area judged again
 own `community.areas` — and the area-key and area-boundary clauses as REQ-0067 describes. A
 refused forced re-import leaves the existing community as it was. The real import's `code` is
 the first refusal's, in the order member values, area keys, area boundaries, asset keys,
-sensors.
+sensors, delivery points.
 
 ### REQ-0075 — a community is retired by a forced import naming it with no members
 

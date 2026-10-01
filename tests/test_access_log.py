@@ -187,6 +187,21 @@ class TestRedactPath:
             == f"/anything?limit=1&{name}={{redacted}}"
         )
 
+    def test_the_pod_a_correction_replaces_is_redacted(self):
+        """`PUT …/delivery-points/{new}?replaces={old}` (REQ-0084) carries two
+        PODs: the new one in the path and the old one in the query.
+
+        @verifies REQ-0080
+        """
+        old = "DP-0ld9a2"
+        raw = f"/admin/communities/{C}/members/ex-00001/delivery-points/{DP}?replaces={old}"
+        logged = redact_path(raw)
+        assert logged == (
+            f"/admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}}"
+            "?replaces={redacted}"
+        )
+        assert DP not in logged and old not in logged
+
     @pytest.mark.parametrize(
         "raw",
         [

@@ -55,10 +55,13 @@ from celine.rec_registry.schemas.models import (
     DeletionReport,
     DeliveryPoint,
     DeliveryPointsResponse,
+    MemberAreaPut,
     MemberCreate,
     MemberDetail,
+    MemberNamePut,
     MemberPatch,
     MemberProfilePatch,
+    MemberRolePut,
     MemberStatusChange,
     TopologyNode,
 )
@@ -111,6 +114,10 @@ def _check_status(status: str | None) -> None:
 
 def _sensor_held(exc: member_service.SensorHeld) -> RegistryError:
     return RegistryError(409, str(exc), ErrorCode.SENSOR_HELD)
+
+
+def _delivery_point_held(exc: member_service.DeliveryPointHeld) -> RegistryError:
+    return RegistryError(409, str(exc), ErrorCode.DELIVERY_POINT_HELD)
 
 
 def _asset_key_too_long(exc: member_service.AssetKeyTooLong) -> RegistryError:
@@ -174,7 +181,9 @@ async def create_member(
     service translates that back into the same conflict.
 
     An `active` member created with meters is `409 sensor_held` when another
-    active member, in any community, holds one of their sensors (REQ-0069).
+    active member, in any community, holds one of their sensors (REQ-0069),
+    and one created with delivery points is `409 delivery_point_held` when
+    another active member holds one of those (REQ-0085).
     An asset key longer than 128 characters is `422 asset_key_too_long`
     (REQ-0028).
 
@@ -199,6 +208,8 @@ async def create_member(
         raise RegistryError(409, str(exc), exc.code) from exc
     except member_service.SensorHeld as exc:
         raise _sensor_held(exc) from exc
+    except member_service.DeliveryPointHeld as exc:
+        raise _delivery_point_held(exc) from exc
     except member_service.AssetKeyTooLong as exc:
         raise _asset_key_too_long(exc) from exc
 
@@ -246,8 +257,9 @@ async def patch_member(
     be a conflict.
 
     Setting `status: active` on a member that was not active re-checks its
-    sensors, and the whole patch is refused `409 sensor_held` when another
-    active member holds one (REQ-0069).
+    sensors and delivery points, and the whole patch is refused
+    `409 sensor_held` / `409 delivery_point_held` when another active member
+    holds one (REQ-0069, REQ-0085).
 
     `role` and `area` are still accepted here, for `members.write` holders,
     and held to the same sets as on `PATCH …/profile`: `422 invalid_role`,
@@ -301,6 +313,8 @@ async def patch_member(
         )
     except member_service.SensorHeld as exc:
         raise _sensor_held(exc) from exc
+    except member_service.DeliveryPointHeld as exc:
+        raise _delivery_point_held(exc) from exc
 
     await member_service.apply_member_patch(member, patch)
     try:
@@ -362,6 +376,96 @@ async def patch_member_profile(
     return _member_detail(member)
 
 
+async def _put_member_fields(
+    session: AsyncSession, community_key: str, member_key: str, fields: dict
+) -> MemberDetail:
+    """Write one field group of a member, checked as the general `PATCH` checks it.
+
+    The value checks are the general `PATCH`'s own (`_check_member_values`,
+    REQ-0066) and the write is its own (`apply_member_patch`), so a field
+    written here and one written there cannot be held to different rules.
+    """
+    community, member = await _resolve(session, community_key, member_key)
+    await _check_member_values(session, community, fields)
+    await member_service.apply_member_patch(member, fields)
+    await session.commit()
+    await session.refresh(member)
+    return _member_detail(member)
+
+
+@router.put(
+    "/communities/{community_key}/members/{member_key}/name",
+    response_model=MemberDetail,
+    responses=error_responses(404),
+)
+async def put_member_name(
+    community_key: str,
+    member_key: str,
+    payload: MemberNamePut,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a member's name, and nothing else (REQ-0083).
+
+    The body is `{name}`: the one key, not `null`, and no other — anything
+    else is `422` (FastAPI's validation body) and changes nothing. Derives
+    `members.name.write` (REQ-0081), which `rec-registry.members.name.write`,
+    `rec-registry.members.write` and `rec-registry.admin` satisfy (REQ-0082).
+    """
+    return await _put_member_fields(
+        session, community_key, member_key, {"name": payload.name}
+    )
+
+
+@router.put(
+    "/communities/{community_key}/members/{member_key}/role",
+    response_model=MemberDetail,
+    responses=error_responses(404, 422),
+)
+async def put_member_role(
+    community_key: str,
+    member_key: str,
+    payload: MemberRolePut,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a member's role, and nothing else (REQ-0083).
+
+    The body is `{role}`, and no other key. A role outside the set is
+    `422 invalid_role`, as on the general `PATCH` (REQ-0066). Derives
+    `members.role.write` (REQ-0081), which `rec-registry.members.role.write`,
+    `rec-registry.members.profile.write`, `rec-registry.members.write` and
+    `rec-registry.admin` satisfy (REQ-0082). A role change leaves the
+    member's assets as they are.
+    """
+    return await _put_member_fields(
+        session, community_key, member_key, {"role": payload.role}
+    )
+
+
+@router.put(
+    "/communities/{community_key}/members/{member_key}/area",
+    response_model=MemberDetail,
+    responses=error_responses(404, 422),
+)
+async def put_member_area(
+    community_key: str,
+    member_key: str,
+    payload: MemberAreaPut,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a member's area, and nothing else (REQ-0083).
+
+    The body is `{area}`, and no other key. An area that is not a key of the
+    community's areas is `422 unknown_area`, checked under the community's
+    row as on the general `PATCH` (REQ-0066). Derives `members.area.write`
+    (REQ-0081), which `rec-registry.members.area.write`,
+    `rec-registry.members.profile.write`, `rec-registry.members.write` and
+    `rec-registry.admin` satisfy (REQ-0082).
+    """
+    return await _put_member_fields(
+        session, community_key, member_key, {"area": payload.area}
+    )
+
+
 @router.post(
     "/communities/{community_key}/members/{member_key}/status",
     response_model=MemberDetail,
@@ -379,9 +483,10 @@ async def change_member_status(
     reasons about — and because it reads clearly in an audit log, which a
     generic field update does not.
 
-    A move to `active` re-checks the member's sensors: when another active
-    member took one meanwhile it answers `409 sensor_held` and the status is
-    left as it was (REQ-0069).
+    A move to `active` re-checks the member's sensors and delivery points:
+    when another active member took one meanwhile it answers
+    `409 sensor_held` / `409 delivery_point_held` and the status is left as
+    it was (REQ-0069, REQ-0085).
     """
     community, member = await _resolve(session, community_key, member_key)
 
@@ -393,6 +498,8 @@ async def change_member_status(
         )
     except member_service.SensorHeld as exc:
         raise _sensor_held(exc) from exc
+    except member_service.DeliveryPointHeld as exc:
+        raise _delivery_point_held(exc) from exc
 
     member.status = payload.status
     if payload.reason:
@@ -472,13 +579,22 @@ async def delete_member(
 @router.put(
     "/communities/{community_key}/members/{member_key}/delivery-points/{point_id}",
     response_model=DeliveryPointsResponse,
-    responses=error_responses(404),
+    responses=error_responses(404, 409),
 )
 async def upsert_delivery_point(
     community_key: str,
     member_key: str,
     point_id: str,
     payload: DeliveryPointIn,
+    replaces: str | None = Query(
+        default=None,
+        description=(
+            "Correct a delivery point: the id of the member's point this one "
+            "replaces. In one transaction the new point is added, this one "
+            "removed, and the member's meters whose `pod` named it are "
+            "relinked to the new id. `404` when the member has no such point."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """Add or replace one supply point, keeping the others.
@@ -486,17 +602,34 @@ async def upsert_delivery_point(
     A sub-resource rather than a field on the member, because `delivery_points`
     is a JSONB list: a member gaining a second supply point must not lose the
     first, which is exactly what a naive whole-field update does.
+
+    **`?replaces={old}` corrects a point in one write** (REQ-0084): the new
+    point is added, `old` (trimmed, case-insensitive) is removed, and the
+    member's meters whose `properties.pod` named `old` are relinked to the
+    new id, as the path spells it — all in one transaction, so a failure
+    leaves both points and every link as they were. `404` when `old` is not
+    this member's point. The query never changes the action: this route
+    derives `members.delivery_points.write` either way (REQ-0081).
+
+    An `active` member taking a point another active member holds, in any
+    community, is `409 delivery_point_held` (REQ-0085), and nothing changes.
     """
-    _, member = await _resolve(session, community_key, member_key)
+    community, member = await _resolve(session, community_key, member_key)
 
     if payload.id != point_id:
         raise HTTPException(
             422, f"Body id {payload.id!r} does not match path id {point_id!r}"
         )
 
-    member.delivery_points = member_service.merge_delivery_point(
-        member.delivery_points or [], payload
-    )
+    try:
+        await member_service.put_delivery_point(
+            session, community, member, payload, replaces=replaces
+        )
+    except member_service.DeliveryPointNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except member_service.DeliveryPointHeld as exc:
+        raise _delivery_point_held(exc) from exc
+
     await session.commit()
     await session.refresh(member)
 
@@ -508,7 +641,7 @@ async def upsert_delivery_point(
 @router.delete(
     "/communities/{community_key}/members/{member_key}/delivery-points/{point_id}",
     response_model=DeliveryPointsResponse,
-    responses=error_responses(404),
+    responses=error_responses(404, 409),
 )
 async def remove_delivery_point(
     community_key: str,
@@ -516,14 +649,21 @@ async def remove_delivery_point(
     point_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Remove one supply point, keeping the others."""
+    """Remove one supply point, keeping the others.
+
+    Refused `409 delivery_point_linked` while one of the member's meters
+    names it as its `pod` (REQ-0084): correct it with `PUT …?replaces=`, or
+    detach the meter, first.
+    """
     _, member = await _resolve(session, community_key, member_key)
 
-    existing = member.delivery_points or []
-    if not any(dp.get("id") == point_id for dp in existing):
-        raise HTTPException(404, f"Delivery point {point_id!r} not found")
+    try:
+        await member_service.remove_unlinked_delivery_point(session, member, point_id)
+    except member_service.DeliveryPointNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except member_service.DeliveryPointLinked as exc:
+        raise RegistryError(409, str(exc), ErrorCode.DELIVERY_POINT_LINKED) from exc
 
-    member.delivery_points = member_service.remove_delivery_point(existing, point_id)
     await session.commit()
     await session.refresh(member)
 

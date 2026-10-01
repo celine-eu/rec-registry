@@ -5,15 +5,20 @@
 `/admin` routes need a JWT and an OPA decision. The action is derived from the
 path **and** the HTTP method, so reads and writes are separate grants. Only the
 route's fixed segments are read, each at its position: a member key, asset key or
-any other id containing `lookup`, `import`, `export` or `profile` never changes the action,
+any other id containing `lookup`, `import`, `export`, `profile`, `name`, `role`, `area` or
+`delivery-points` never changes the action, nor does the body or the query,
 and a path matching no route derives `admin`, which only `rec-registry.admin`
 satisfies (REQ-0065).
 
 | Action | Reached by | Scope |
 |---|---|---|
 | `read` | any `GET` under `/admin` | `rec-registry.read` |
-| `members.write` | write methods on `…/members…`, delivery points included | `rec-registry.members.write` |
+| `members.write` | create, the general `PATCH`, `…/status` and `DELETE` on `…/members…` | `rec-registry.members.write` |
 | `members.profile.write` | `PATCH …/members/{key}/profile` (role and area only) | `rec-registry.members.profile.write`, or `rec-registry.members.write` |
+| `members.name.write` | `PUT …/members/{key}/name` | `rec-registry.members.name.write`, or `rec-registry.members.write` |
+| `members.role.write` | `PUT …/members/{key}/role` | `rec-registry.members.role.write`, `rec-registry.members.profile.write`, or `rec-registry.members.write` |
+| `members.area.write` | `PUT …/members/{key}/area` | `rec-registry.members.area.write`, `rec-registry.members.profile.write`, or `rec-registry.members.write` |
+| `members.delivery_points.write` | `PUT` and `DELETE …/members/{key}/delivery-points/{id}`, `?replaces=` included | `rec-registry.members.delivery_points.write`, or `rec-registry.members.write` |
 | `members.purge` | `DELETE …/members/{key}?purge=true` | `rec-registry.members.purge` |
 | `assets.write` | write methods on `…/assets…` | `rec-registry.assets.write` |
 | `community.write` | write methods on a community, its areas (the area rename included) or its topology nodes | `rec-registry.community.write` |
@@ -25,9 +30,10 @@ satisfies (REQ-0065).
 `{service}.admin` as covering `{service}.*`), so existing tokens keep working —
 but **do not give it to a service account**. Grant the actions it calls: a
 service that registers approved participants needs `members.write`, one that
-attaches meters needs `assets.write`, one that corrects a member's role and area
-needs `members.profile.write` — which reaches that one route and nothing else — and none has any business importing,
-exporting or purging.
+attaches meters needs `assets.write`, one that corrects a member's area needs
+`members.area.write` — which reaches that one route and nothing else (ADR-0011) — and none
+has any business importing, exporting or purging. A member field is granted alone; identity
+(`user_id`, `did`, status, creating a member) is `members.write` only.
 
 Interactive OpenAPI docs are available at `http://localhost:8004/docs`.
 
@@ -64,10 +70,12 @@ codes `ErrorCode`.
 | `area_key_taken` | `409` | renaming an area onto a key the community already has |
 | `invalid_area_key` | `422` | an area key that is not letters, digits, `-` and `_`, starting with a letter or digit, at most 128 characters (area `PUT`, rename's `new_key`, import) |
 | `not_a_member` | `403` | a `/user` route other than `GET /user`, for a caller whose username names no member |
+| `delivery_point_held` | `409` (`422` on an import) | another active member, in any community, holds the delivery point (trimmed, case-insensitive) |
+| `delivery_point_linked` | `409` | deleting a delivery point one of the member's meters still names as its `pod` |
 
 Other refusals — FastAPI's validation errors, a body id or key that does not match
-the path, the import's `force` guard, a `404` for an unknown delivery point, topology
-node, or area on its `DELETE` — keep the plain `{"detail": ...}` body. A route
+the path, the import's `force` guard, a `404` for an unknown delivery point (on its
+`DELETE`, or as the `replaces` of a correction), topology node, or area on its `DELETE` — keep the plain `{"detail": ...}` body. A route
 that answers a coded `422` documents its `422` as `oneOf` `ErrorResponse` and
 `HTTPValidationError` (whose `detail` is a list): both arrive with that status.
 
@@ -351,7 +359,8 @@ fields are kept in `extra` too.
 taken (`member_key_taken`, `user_id_taken`), naming the existing key so the caller
 can switch to `PATCH`, or when the `did` is already held by another member
 anywhere in the registry (`did_taken`); `409 sensor_held` when an `active` member
-is created with a meter whose sensor another active member holds; `404
+is created with a meter whose sensor another active member holds, and `409
+delivery_point_held` with a delivery point another active member holds; `404
 community_not_found`; `422 invalid_role`, `invalid_status` or `unknown_area` when
 `role`, `status` or `area` is out of set (the area must be a key of the
 community's `areas`).
@@ -373,8 +382,9 @@ member of the community, or `409 did_taken` if the new `did` belongs to any othe
 member in the registry. A DID clash inside the addressed community names the
 holding member; one in another community does not, because which member of which
 other community holds a DID is not the caller's question. `status: active` on a
-member that was not active re-checks its sensors: `409 sensor_held`, and nothing
-in the patch is applied, when another active member holds one.
+member that was not active re-checks its sensors and delivery points: `409
+sensor_held` / `409 delivery_point_held`, and nothing in the patch is applied, when
+another active member holds one.
 
 `role` and `area` are still accepted here, with the checks of the profile route
 below; `status` too. Out of set: `422 invalid_role`, `invalid_status`,
@@ -402,14 +412,29 @@ member's status is not looked at and its assets are left as they are.
 | `area` not a key of the community's `areas` | `422 unknown_area` |
 | unknown community / member | `404 community_not_found` / `member_not_found` |
 
+### `PUT /admin/communities/{community_key}/members/{member_key}/name|role|area`
+
+One field of a member, and nothing else: `{"name": "…"}`, `{"role": "…"}`,
+`{"area": "…"}`. Each derives its own action (`members.name.write`,
+`members.role.write`, `members.area.write`), so a service can be granted one field
+alone; the supersets are in the table at the top.
+
+| Outcome | Answer |
+|---|---|
+| written | `200` with the member (`MemberDetail`) |
+| the key absent or `null`, or any other key beside it | `422`, FastAPI's validation body; nothing changes |
+| `role` out of set / `area` not one of the community's | `422 invalid_role` / `unknown_area` — the same answer the general `PATCH` gives |
+| unknown community / member | `404 community_not_found` / `member_not_found` |
+
 ### `POST /admin/communities/{community_key}/members/{member_key}/status`
 
 Move a member through `pending → active → suspended → inactive`, with an optional
 `reason` recorded on the member.
 
-A move to `active` re-checks the member's sensors — only an active member holds
-one — and answers `409 sensor_held`, leaving the status unchanged, when another
-active member took one meanwhile. An unknown status is `422 invalid_status`.
+A move to `active` re-checks the member's sensors and delivery points — only an
+active member holds one — and answers `409 sensor_held` / `409 delivery_point_held`,
+leaving the status unchanged, when another active member took one meanwhile. An
+unknown status is `422 invalid_status`.
 
 ### `DELETE /admin/communities/{community_key}/members/{member_key}`
 
@@ -426,7 +451,27 @@ day to day cannot perform one.
 ### `PUT|DELETE /admin/communities/{ck}/members/{mk}/delivery-points/{point_id}`
 
 Add, replace or remove one supply point, keeping the others. The body `id` must
-match the path (`422` otherwise).
+match the path (`422` otherwise). Derives `members.delivery_points.write`.
+
+**One active holder per delivery point** across the registry, compared trimmed and
+case-insensitively: a `PUT` giving an active member a point another active member
+holds is `409 delivery_point_held` (the holder named by key only inside this
+community). A member that is not active is checked when it is reactivated.
+
+**Correcting a POD** is one write:
+`PUT …/delivery-points/{new}?replaces={old}` with the new point as body. In one
+transaction it adds `new`, removes `old` and relinks the member's meters whose
+`pod` named `old` to `new` (as the path spells it); a failure changes nothing.
+
+| Outcome | Answer |
+|---|---|
+| corrected | `200`, `{"delivery_points": [...]}` — the member's points after the write |
+| `old` is not one of this member's points | `404` (plain `{"detail"}`) |
+| `new` is held by another active member | `409 delivery_point_held` |
+
+`DELETE` of a point one of the member's meters still names is `409
+delivery_point_linked`: correct it with `replaces`, or detach the meter, first. An
+unknown point is `404`.
 
 ### `PUT|DELETE /admin/communities/{ck}/members/{mk}/assets/{asset_key}`
 

@@ -29,6 +29,11 @@ from celine.rec_registry.schemas.bundle import (
     AssetCollectionIn,
     TopologyNodeIn,
 )
+from celine.rec_registry.services.delivery_points import (
+    active_delivery_point_holders,
+    lock_delivery_points,
+    normalise_delivery_point_id,
+)
 from celine.rec_registry.services.sensors import (
     ACTIVE,
     active_holders,
@@ -182,6 +187,69 @@ def _active_meters(bundle: RegistryBundleIn) -> list[tuple[str, str, str]]:
     return found
 
 
+def _active_delivery_points(bundle: RegistryBundleIn) -> list[tuple[str, str]]:
+    """``(normalised delivery-point id, member key)`` of every active member's
+    delivery points in the bundle, one per member and id (REQ-0085)."""
+    found: set[tuple[str, str]] = set()
+    for member_key, member in bundle.members.items():
+        if member.status != ACTIVE:
+            continue
+        for point in member.delivery_points or []:
+            point_id = normalise_delivery_point_id(point.id)
+            if point_id is not None:
+                found.add((point_id, member_key))
+    return sorted(found)
+
+
+async def _delivery_point_refusals(
+    session: AsyncSession, bundle: RegistryBundleIn, *, lock: bool
+) -> list[tuple[str, str]]:
+    """One delivery point held twice (REQ-0085), as the sensor clause does it.
+
+    By two active members of the bundle, or by one of them and an active
+    member of **another** community; the replaced community's own rows do not
+    count. Reported by this bundle's member keys, never by the id itself nor
+    by the other community or member. ``lock`` takes the advisory locks,
+    after the sensors' (the lock order).
+    """
+    points = _active_delivery_points(bundle)
+    if not points:
+        return []
+    refusals: list[tuple[str, str]] = []
+    holders: dict[str, list[str]] = {}
+    for point_id, member_key in points:
+        holders.setdefault(point_id, []).append(member_key)
+    for point_id in sorted(holders):
+        if len(holders[point_id]) > 1:
+            named = ", ".join(f"member {m!r}" for m in sorted(holders[point_id]))
+            refusals.append(
+                (
+                    ErrorCode.DELIVERY_POINT_HELD.value,
+                    f"one delivery point is held by several active members: {named}",
+                )
+            )
+    if lock:
+        await lock_delivery_points(session, holders)
+    elsewhere = {
+        h.point_id
+        for h in await active_delivery_point_holders(
+            session, holders, exclude_community_key=bundle.community.id
+        )
+    }
+    for point_id, member_key in sorted(points, key=lambda p: (p[1], p[0])):
+        if point_id in elsewhere:
+            refusals.append(
+                (
+                    ErrorCode.DELIVERY_POINT_HELD.value,
+                    (
+                        f"member {member_key!r}: a delivery point is already held "
+                        "by an active member of another community"
+                    ),
+                )
+            )
+    return refusals
+
+
 async def import_refusals(
     session: AsyncSession, bundle: RegistryBundleIn, *, lock: bool = False
 ) -> list[tuple[str, str]]:
@@ -209,6 +277,9 @@ async def import_refusals(
     starting with a letter or digit, at most 128 characters
     (``invalid_area_key``, REQ-0067), named by area key; a member naming it is
     not refused for that, the area is.
+
+    One delivery point held twice (``delivery_point_held``, REQ-0085), by
+    the same rule as the sensors, checked after them.
 
     Also an asset key longer than the column holds (``asset_key_too_long``,
     REQ-0028), named by its member key and length — the key itself can embed a
@@ -242,6 +313,7 @@ async def import_refusals(
 
     meters = _active_meters(bundle)
     if not meters:
+        refusals.extend(await _delivery_point_refusals(session, bundle, lock=lock))
         return refusals
 
     holders: dict[str, list[tuple[str, str]]] = {}
@@ -275,6 +347,7 @@ async def import_refusals(
                 )
             )
 
+    refusals.extend(await _delivery_point_refusals(session, bundle, lock=lock))
     return refusals
 
 

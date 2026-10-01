@@ -42,6 +42,13 @@ _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
+# A member's field groups written through their own route, one action each
+# (REQ-0081): `PUT …/members/{mk}/<segment>` derives `members.<segment>.write`.
+# The segment is a fixed route segment read at its position, never a caller's
+# id, and never the body. Adding a field group is a segment here, a rule in
+# `access.rego` and a scope in `celine-policies` (ADR-0011).
+_MEMBER_FIELD_ROUTES = frozenset({"name", "role", "area"})
+
 # The lookups that start from an identifier naming a person and answer what that
 # person holds. Matched as the whole route segment after `/admin/lookup/`, never
 # as a substring of the path.
@@ -265,7 +272,11 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         #   communities/{ck}/members/{mk}                      members.write | .purge
         #   communities/{ck}/members/{mk}/status               members.write
         #   communities/{ck}/members/{mk}/profile  (PATCH)     members.profile.write
-        #   communities/{ck}/members/{mk}/delivery-points/{id} members.write
+        #   communities/{ck}/members/{mk}/name     (PUT)       members.name.write
+        #   communities/{ck}/members/{mk}/role     (PUT)       members.role.write
+        #   communities/{ck}/members/{mk}/area     (PUT)       members.area.write
+        #   communities/{ck}/members/{mk}/delivery-points/{id}
+        #                                  (PUT, DELETE)       members.delivery_points.write
         #   communities/{ck}/members/{mk}/assets/{ak}          assets.write
         n = len(rest)
         if n == 2 or (n == 4 and rest[2] in ("areas", "topology")):
@@ -298,8 +309,19 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 if method == "PATCH":
                     return "members.profile.write"
                 return "admin"
+            if n == 5 and rest[4] in _MEMBER_FIELD_ROUTES:
+                # One field group, one action, one scope (REQ-0081). The
+                # route is a PUT; any other method on it is no route at all.
+                if method == "PUT":
+                    return f"members.{rest[4]}.write"
+                return "admin"
             if n == 6 and rest[4] == "delivery-points":
-                return "members.write"
+                # The path segment is hyphenated; the action and its scope use
+                # an underscore (REQ-0081). `?replaces=` changes nothing here:
+                # the query is never read for this route (REQ-0081).
+                if method in ("PUT", "DELETE"):
+                    return "members.delivery_points.write"
+                return "admin"
             if n == 6 and rest[4] == "assets":
                 return "assets.write"
         return "admin"

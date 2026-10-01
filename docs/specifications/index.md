@@ -24,9 +24,11 @@ see their own data there, and the error surfaces three repositories away from it
 
 Two more write. The community dashboard's backend, `../celine-community`, attaches and
 detaches meters and corrects a member's role and area (REQ-0063, REQ-0066,
-REQ-0069 – REQ-0071), and `../onboarding` writes a community's areas and topology from its
-templates through the area and topology node routes (REQ-0067, REQ-0072); the area rename
-route (REQ-0079) is the one its sync moves an area with members to a new key through.
+REQ-0069 – REQ-0071; the per-field routes of REQ-0081 – REQ-0083 when it moves to them),
+and `../onboarding` writes a community's areas and topology from its templates through the
+area and topology node routes (REQ-0067, REQ-0072); the area rename route (REQ-0079) is the
+one its sync moves an area with members to a new key through, and a POD correction
+(REQ-0084) the one it corrects a member's declared supply point through.
 
 ## None of them describes a defect
 
@@ -100,9 +102,9 @@ reports planned requirements as unverified.
 
 | | |
 |---|---|
-| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
-| REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069 | [the registry model](registry-model.md) — what a community, member and asset are |
-| REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079 | [member and community writes](member-writes.md) — how a community changes at runtime |
+| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
+| REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069, REQ-0085 | [the registry model](registry-model.md) — what a community, member and asset are |
+| REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079, REQ-0083 – REQ-0084 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
 | REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
@@ -111,7 +113,8 @@ reports planned requirements as unverified.
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
-same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080.
+same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080 and
+REQ-0081 – REQ-0085.
 
 ## What is not covered
 
@@ -150,7 +153,9 @@ part that belongs to it.
   upserting one area key resolve by last-writer-wins. One sensor attached to
   two members at once is covered, serialised by an advisory lock (REQ-0069), and so is a
   member moved into an area while it is deleted, and two areas written onto one substation
-  at once, both serialised on the community's row (REQ-0066, REQ-0067).
+  at once, both serialised on the community's row (REQ-0066, REQ-0067). One delivery point
+given to two active members at once is covered the way the sensor is, by its own advisory
+lock (REQ-0085).
 
 ## What is not here
 

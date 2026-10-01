@@ -154,6 +154,14 @@ class TestMemberExtra:
 
 
 def _member_payload(**overrides) -> dict:
+    # One POD per user id unless the test says otherwise: one delivery point
+    # has one active holder across the registry (REQ-0085), so two members
+    # created with the same default would clash. `kc-0001` keeps the
+    # `IT001E00000001` the assertions below name.
+    user_id = overrides.get("user_id", "kc-0001")
+    digits = "".join(ch for ch in user_id if ch.isdigit()) or str(
+        sum(map(ord, user_id))
+    )
     payload = {
         "user_id": "kc-0001",
         "name": "Test Member",
@@ -161,7 +169,7 @@ def _member_payload(**overrides) -> dict:
         "role": "consumer",
         "area": "north",
         "status": "active",
-        "delivery_points": [{"id": "IT001E00000001", "type": "pod"}],
+        "delivery_points": [{"id": f"IT001E{digits[-8:]:0>8}", "type": "pod"}],
     }
     payload.update(overrides)
     return payload
@@ -801,7 +809,8 @@ class TestTheDataspaceDid:
             json=_member_payload(key="held-by-me", did=self.DID),
         )
         await live_client.post(
-            f"/admin/communities/{two}/members", json=_member_payload(key="m2")
+            f"/admin/communities/{two}/members",
+            json=_member_payload(key="m2", delivery_points=[{"id": "IT001E00000092", "type": "pod"}]),
         )
 
         r = await live_client.patch(
@@ -827,7 +836,8 @@ class TestTheDataspaceDid:
             json=_member_payload(key="ex-00001", did=self.DID),
         )
         await live_client.post(
-            f"/admin/communities/{two}/members", json=_member_payload(key="ex-00001")
+            f"/admin/communities/{two}/members",
+            json=_member_payload(key="ex-00001", delivery_points=[{"id": "IT001E00000092", "type": "pod"}]),
         )
 
         r = await live_client.patch(
@@ -1029,6 +1039,64 @@ class TestNoWriteReducesASibling:
             f"{m2}/assets/meter-SEN-1", json=meter("meter-SEN-1", "SEN-1")
         )
         assert r.status_code == 409, r.text
+
+        # Per-field routes (REQ-0083), accepted and refused.
+        for field, ok, bad in (
+            ("name", "B", None),
+            ("role", "producer", "landlord"),
+            ("area", "north", "nowhere"),
+        ):
+            r = await live_client.put(f"{m1}/{field}", json={field: ok})
+            assert r.status_code == 200, r.text
+            if bad is not None:
+                r = await live_client.put(f"{m1}/{field}", json={field: bad})
+                assert r.status_code == 422, r.text
+
+        # Delivery points (REQ-0084, REQ-0085): a meter naming one, a refused
+        # `delivery_point_linked` delete, a correction relinking it, refused
+        # corrections (`404`, `delivery_point_held`), and an accepted put and
+        # delete. Every other point of both members survives each of them.
+        async def points(member: str) -> list[str]:
+            r = await live_client.get(member)
+            return [dp["id"] for dp in r.json()["delivery_points"]]
+
+        linked_meter = meter("meter-SEN-7", "SEN-7")
+        linked_meter["properties"]["pod"] = "IT777"
+        r = await live_client.put(f"{m1}/assets/meter-SEN-7", json=linked_meter)
+        assert r.status_code == 200, r.text
+        m1_points = await points(m1)
+        assert "IT777" in m1_points
+        r = await live_client.delete(f"{m1}/delivery-points/IT777")
+        assert r.status_code == 409, r.text
+        assert await points(m1) == m1_points
+        r = await live_client.put(
+            f"{m1}/delivery-points/IT778",
+            params={"replaces": "IT777"},
+            json={"id": "IT778", "type": "pod"},
+        )
+        assert r.status_code == 200, r.text
+        m1_points = [p for p in m1_points if p != "IT777"] + ["IT778"]
+        assert await points(m1) == m1_points
+        r = await live_client.put(
+            f"{m1}/delivery-points/IT779",
+            params={"replaces": "IT000"},
+            json={"id": "IT779", "type": "pod"},
+        )
+        assert r.status_code == 404, r.text
+        r = await live_client.put(
+            f"{m2}/delivery-points/IT778", json={"id": "IT778", "type": "pod"}
+        )
+        assert r.status_code == 409, r.text
+        m2_points = await points(m2)
+        r = await live_client.put(
+            f"{m2}/delivery-points/IT780", json={"id": "IT780", "type": "pod"}
+        )
+        assert r.status_code == 200, r.text
+        r = await live_client.delete(f"{m2}/delivery-points/IT780")
+        assert r.status_code == 200, r.text
+        assert await points(m1) == m1_points
+        assert await points(m2) == m2_points
+        assert await count() == 2
 
         await live_client.delete(f"/admin/communities/{key}/members/m2")  # soft
 
@@ -1485,7 +1553,11 @@ class TestTwoWritersAtOnce:
             request = asyncio.create_task(
                 live_client.post(
                     f"/admin/communities/{key}/members",
-                    json=_member_payload(key="ex-00002", user_id="kc-0001"),
+                    # Its own POD, so the race is the user_id index's and not
+                    # the delivery point's (REQ-0085).
+                    json=_member_payload(
+                        key="ex-00002", user_id="kc-0001", delivery_points=[{"id": "IT001E00000092", "type": "pod"}]
+                    ),
                 )
             )
             await _wait_until_blocked(pg_engine, holder_pid)

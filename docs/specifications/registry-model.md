@@ -94,7 +94,8 @@ keys resolve, so a relationship naming an absent asset is stored as given.
 
 They live in one JSONB column on the member, which is the reason every write touching them
 merges by identity rather than replacing the field (REQ-0027) — and the reason they are
-absent from the patch model entirely.
+absent from the patch model entirely. An active member holds each of its points alone
+(REQ-0085).
 
 ### REQ-0018 — the schema version is read and reported, and never refuses
 
@@ -190,7 +191,8 @@ is documentation and is not enforced (REQ-0018).
 `role` must be one of `consumer`, `prosumer`, `producer`, `operator`, `admin`, and `status` one
 of `pending`, `active`, `suspended`, `inactive` — on creating a member, on both member
 `PATCH` routes — the general one, which keeps accepting `role` and `area` for
-`members.write` holders (REQ-0024), and the profile route (REQ-0070) — on the status route,
+`members.write` holders (REQ-0024), and the profile route (REQ-0070) — on the role and area
+`PUT` routes (REQ-0083), on the status route,
 and in a bundle. `area` must be a key of the community's `areas` — in a bundle, of the
 bundle's own `community.areas`, since the import replaces the community. A value outside the
 set answers `422` with the code of REQ-0073 — `invalid_role`, `invalid_status` or
@@ -344,3 +346,42 @@ the next write, not the past ones; `celine-rec-registry duplicate-sensors` lists
 Two holders double-count every reading of the sensor in every consumer that joins readings to
 members, and nothing downstream can tell. Decided in
 [ADR-0004](../decisions/ADR-0004-a-sensor-has-one-active-holder-and-detaching-deletes-the-meter.md).
+
+### REQ-0085 — a delivery point has at most one active holder across the whole registry
+
+No two members whose status is `active` list a delivery point with the same id, in one
+community or in two. The comparison is on the id **trimmed and lower-cased**: trimmed by the
+one character set REQ-0069 defines (`core/sensor_id.py`), in Python and in the SQL that
+compares rows already stored alike, and lower-cased by Python's `str.lower` and Postgres
+`lower`. The id is stored as the caller spelled it. A member whose status is not `active`
+holds nothing, so deactivating a member releases its points; a point's own `active` flag is
+not read — an active member holds every point it lists.
+
+Checked on every path that can make an active member hold a point: the delivery-point `PUT`,
+with or without `replaces` (REQ-0027, REQ-0084); creating a member with delivery points
+(REQ-0020); a status change to `active` through the status route or `PATCH` (REQ-0024,
+REQ-0025); and the bundle import (REQ-0074). A clash answers `409` with the code
+**`delivery_point_held`** (REQ-0073), in the body `sensor_held` uses, and changes nothing;
+reactivation leaves the status as it was. A `PUT` to a member who is not active is not
+checked — its reactivation is. Re-sending a member's own point is not a clash.
+
+**Check and write run under one transaction-scoped advisory lock keyed on the compared id**
+(a namespace of its own, apart from the sensors'), after the member's row lock and after any
+sensor locks the same write takes: community row, member rows, sensor locks, delivery-point
+locks — the order every write takes them in. Two writers giving one point to two active
+members at once get one success and one `delivery_point_held`.
+
+**The answer names nobody outside the community addressed**, as REQ-0069's: a holder inside
+it may be named by member key, a holder in another community is named neither by member nor
+by community. On the import the refusal is `422` `delivery_point_held`, naming this bundle's
+member keys and never the point's id; the replaced community's own rows do not count; a dry
+run lists it in `refusals`.
+
+**Existing duplicates are not repaired, and do not block unrelated writes.** The check
+refuses the next write that would make one, not the past ones; a duplicate already stored
+blocks re-sending either holder's point, reactivating either holder, and re-importing either
+community, until it is resolved. No report lists them yet.
+
+A mistyped POD that happens to be somebody else's is the case this catches: two holders would
+attribute one supply to two people in every consumer that joins supply to members. Decided
+in [ADR-0012](../decisions/ADR-0012-a-delivery-point-has-one-active-holder-and-is-corrected-in-one-write.md).

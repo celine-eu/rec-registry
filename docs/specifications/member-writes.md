@@ -123,7 +123,10 @@ still occupies that key in the community until the asset is deleted (REQ-0071).
 `PUT …/members/{mk}/delivery-points/{id}` adds or replaces exactly one point, keeping the
 others; re-sending an existing id updates it rather than duplicating it; `DELETE` removes
 one and keeps the rest. Removing an id the member does not have is `404`. The `id` in the
-body must match the one in the path, or `422`.
+body must match the one in the path, or `422`. A `PUT` with `?replaces=` corrects a point
+(REQ-0084); a `DELETE` of a point one of the member's meters names is refused (REQ-0084); an
+active member taking a point another active member holds is refused (REQ-0085). Both routes
+derive `members.delivery_points.write` (REQ-0081).
 
 The merge is by point id, not by list index, and it does not mutate the list it was given.
 Positional replacement silently drops entries, and a member gaining a second supply point
@@ -229,6 +232,11 @@ its `parent` — and accepted deletes — are in it, and so is the area rename (
 accepted and refused `area_key_taken`, `area_not_found` and `invalid_area_key`. For the
 topology writes the test also counts the community's nodes: a node write keeps every other
 node; for the renames it compares the areas: a rename changes one key and nothing else.
+The field routes (REQ-0083), accepted and refused, are in it, and so are the delivery-point
+writes: a `PUT` and a `DELETE`, a correction with `replaces` (REQ-0084), refused `404` and
+`delivery_point_held` (REQ-0085), and a `DELETE` refused `delivery_point_linked`; for these it
+also compares both members' delivery points, which every write but the one addressed leaves
+as they were.
 
 ### REQ-0060 — the dataspace DID is written by `PATCH`, and a clash names its holder only within the community
 
@@ -380,12 +388,15 @@ each comes from:
 | `area_key_taken` | `409` | renaming an area onto a key the community already has (REQ-0079) |
 | `invalid_area_key` | `422` | an area key that is not letters, digits, `-` and `_`, starting with a letter or digit, at most 128 characters — on the area `PUT`, the rename's `new_key` and the import (REQ-0067, REQ-0079) |
 | `not_a_member` | `403` | a self-service read by a caller whose username names no member (REQ-0047) |
+| `delivery_point_held` | `409` | a delivery point held by another active member anywhere, on the delivery-point `PUT`, a create, a move to `active` and the import (REQ-0085) |
+| `delivery_point_linked` | `409` | deleting a delivery point one of the member's meters still names as its `pod` (REQ-0084) |
 
-`sensor_held` is `422` on an import, where the bundle is what is wrong (REQ-0069, REQ-0074).
+`sensor_held` and `delivery_point_held` are `422` on an import, where the bundle is what is
+wrong (REQ-0069, REQ-0074, REQ-0085).
 A route that answers a coded `422` declares its `422` in the OpenAPI document as either body —
 `oneOf` `ErrorResponse` and FastAPI's `HTTPValidationError`, whose `detail` is a list — since
-both arrive with that status: the member create, both `PATCH` routes (REQ-0070) and the status
-route, the asset `PUT`, the area `PUT`, the area rename, the topology node `PUT`, and both
+both arrive with that status: the member create, both `PATCH` routes (REQ-0070), the role and area
+`PUT` routes (REQ-0083) and the status route, the asset `PUT`, the area `PUT`, the area rename, the topology node `PUT`, and both
 import routes.
 The two `404` codes let a caller detaching a meter tell *"that member is gone"* from *"that
 meter is already detached"*. Every write route documents the body in the OpenAPI document as
@@ -398,7 +409,8 @@ requirement that introduces its refusal. An import refusal (REQ-0074) carries th
 invariant it breaks. Refusals no requirement has given a code keep the plain
 `{"detail": "<sentence>"}` body — FastAPI's own validation errors, a body id or key that does
 not match the path, an unknown asset type, the import's `force` guard (REQ-0033), and the `404`
-for an unknown delivery point, topology node, or area on its `DELETE` (the rename's is coded).
+for an unknown delivery point — on its `DELETE` and as the `replaces` of a correction
+(REQ-0084) — topology node, or area on its `DELETE` (the rename's is coded).
 Decided in
 [ADR-0008](../decisions/ADR-0008-a-refusal-carries-a-machine-readable-code.md).
 
@@ -440,3 +452,57 @@ This is how an onboarding template sync renames an area that has members: an are
 the new key is refused (`invalid_area_boundary`, one area per boundary) and a `DELETE` of the
 old key is refused (`area_in_use`) while members hold it. Decided in
 [ADR-0010](../decisions/ADR-0010-an-area-is-renamed-with-its-members-in-one-write.md).
+
+### REQ-0083 — a member's name, role and area each have a route that writes that field and nothing else
+
+`PUT /admin/communities/{ck}/members/{mk}/name` with `{"name": "<name>"}`, `PUT …/role` with
+`{"role": "<role>"}` and `PUT …/area` with `{"area": "<area key>"}` each write one field and
+answer `200` with the member. The body is exactly that one key: absent, `null`, or beside any
+other key — `user_id`, `did`, `status`, another field — it is `422` with FastAPI's validation
+body, and nothing changes. An unknown community or member is `404` `community_not_found` /
+`member_not_found`.
+
+**The value checks are the general `PATCH`'s** (REQ-0066), the same function on the same
+values: a role outside its set is `422 invalid_role`, an area that is not a key of the
+community's areas `422 unknown_area` — the same status, code and sentence as the general
+`PATCH` gives for that value — and a name is held to no set, as on the `PATCH`. The area is
+checked under the community's row (REQ-0066). The member's other fields, its status, its
+delivery points and its assets are left as they are.
+
+Each derives its own action (REQ-0081) so that a service can be granted one field
+(REQ-0082). `PATCH …/profile` (REQ-0070) stays as the role-and-area alias, and the general
+`PATCH` keeps accepting all three for `members.write` holders (REQ-0024). A member whose key is
+`name`, `role`, `area` or `delivery-points` is addressed like any other. Decided in
+[ADR-0011](../decisions/ADR-0011-member-writes-are-granted-per-field.md).
+
+### REQ-0084 — a delivery point is corrected in one write, and one a meter names cannot be deleted
+
+`PUT /admin/communities/{ck}/members/{mk}/delivery-points/{new}?replaces={old}` corrects a
+member's delivery point. In **one transaction**, under the member's row lock:
+
+- `new` is added (the body is the point, its `id` equal to `new`, as REQ-0027);
+- every point of the member whose id is `old`, compared trimmed and case-insensitively as
+  REQ-0085 compares, is removed;
+- every meter of **this member** whose `properties.pod`, compared the same way, names `old` is
+  relinked: its `pod` becomes `new`, spelled as the path spells it. Nothing else of the meter
+  changes, and another member's meter naming `old` is not touched.
+
+It answers `200` with the member's delivery points, as the `PUT` without `replaces` does. A
+failure at any step leaves both points and every link as they were. `old` that is not one of
+this member's points — another member's, an unknown one, a blank one — is `404` (plain
+`{"detail"}` body, as for the `DELETE` of an unknown point) and changes nothing. An active
+member's `new` that another active member holds is `409 delivery_point_held` (REQ-0085),
+checked before anything changes; the member's own `old` is not a clash, so a correction of
+spelling alone (`it001…` → `IT001…`) is accepted. Without `replaces` the `PUT` is REQ-0027's,
+plus REQ-0085. `replaces` never changes the action (REQ-0081).
+
+**`DELETE …/delivery-points/{id}` of a point one of the member's meters still names** as its
+`pod` — trimmed, case-insensitive — is `409 delivery_point_linked`, and nothing changes: the
+meter would otherwise name a supply the member no longer has. The sentence names the point
+and how many meters name it, not the meters. Correct the point with `replaces`, or detach the
+meter (REQ-0071), first. The check and the removal hold the member's row, which a meter
+attach takes too.
+
+The query parameter carries a POD, so the access log redacts it (REQ-0080). This is the call
+onboarding's POD correction makes: one write, no asset grant. Decided in
+[ADR-0012](../decisions/ADR-0012-a-delivery-point-has-one-active-holder-and-is-corrected-in-one-write.md).

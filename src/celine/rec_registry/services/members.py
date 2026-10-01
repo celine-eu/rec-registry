@@ -60,6 +60,12 @@ from celine.rec_registry.services.importer import (
     _extract_properties,
     _extract_relationships,
 )
+from celine.rec_registry.services.delivery_points import (
+    DeliveryPointHeld,
+    ensure_delivery_points_free,
+    member_delivery_point_ids,
+    normalise_delivery_point_id,
+)
 from celine.rec_registry.services.sensors import (
     ACTIVE,
     SensorHeld,
@@ -74,6 +80,9 @@ __all__ = [
     "AssetKeyTaken",
     "AssetKeyTooLong",
     "CommunityNotFound",
+    "DeliveryPointHeld",
+    "DeliveryPointLinked",
+    "DeliveryPointNotFound",
     "MemberConflict",
     "MemberNotFound",
     "SensorHeld",
@@ -86,7 +95,10 @@ __all__ = [
     "member_conflict_from",
     "merge_delivery_point",
     "next_member_key",
+    "put_delivery_point",
+    "relink_meters",
     "remove_delivery_point",
+    "remove_unlinked_delivery_point",
     "lock_community",
     "rename_area",
     "resolve_community",
@@ -147,6 +159,18 @@ class AreaRenameRefused(Exception):
         super().__init__(message)
         self.status = status
         self.code = code
+
+
+class DeliveryPointNotFound(Exception):
+    """The member lists no such delivery point (``404``, REQ-0027, REQ-0084)."""
+
+
+class DeliveryPointLinked(Exception):
+    """A meter of the member still names this delivery point as its ``pod``.
+
+    Answered as ``409 delivery_point_linked`` (REQ-0084): removing the point
+    would leave the meter pointing at a supply the member no longer has.
+    """
 
 
 class AssetKeyTaken(Exception):
@@ -419,6 +443,132 @@ def remove_delivery_point(
     return [dict(dp) for dp in existing if dp.get("id") != point_id]
 
 
+async def _member_meters_naming(
+    session: AsyncSession, member: Member, point_id: str
+) -> list[Asset]:
+    """This member's meters whose ``properties.pod`` names ``point_id``.
+
+    Compared trimmed and case-insensitively, as delivery points are compared
+    for holding (REQ-0085), so a meter written with ``it001…`` still counts as
+    naming ``IT001…``.
+    """
+    wanted = normalise_delivery_point_id(point_id)
+    if wanted is None:
+        return []
+    meters = (
+        await session.scalars(
+            select(Asset).where(
+                Asset.owner_id == member.id, Asset.asset_type == "meter"
+            )
+        )
+    ).all()
+    return [
+        m
+        for m in meters
+        if normalise_delivery_point_id((m.properties or {}).get("pod")) == wanted
+    ]
+
+
+async def relink_meters(
+    session: AsyncSession, member: Member, old_id: str, new_id: str
+) -> int:
+    """Point this member's meters naming ``old_id`` at ``new_id``. Returns how many.
+
+    Only ``properties.pod`` changes, to ``new_id`` as the route received it;
+    every other field of the meter is left as it was. Nothing is committed.
+    """
+    meters = await _member_meters_naming(session, member, old_id)
+    for meter in meters:
+        meter.properties = {**(meter.properties or {}), "pod": new_id}
+    if meters:
+        await session.flush()
+    return len(meters)
+
+
+async def put_delivery_point(
+    session: AsyncSession,
+    community: Community,
+    member: Member,
+    point: DeliveryPointIn,
+    *,
+    replaces: str | None = None,
+) -> int:
+    """Add or replace one delivery point; with ``replaces``, correct one (REQ-0084).
+
+    In the caller's transaction, under the member's row lock:
+
+    * an ``active`` member must not take a point another active member holds
+      (REQ-0085) — ``DeliveryPointHeld``, before anything changes;
+    * with ``replaces``, the member's point(s) whose id is ``replaces``
+      (trimmed, case-insensitive) are removed, ``point`` is merged in, and the
+      member's meters whose ``pod`` named the old id are relinked to
+      ``point.id`` — all or nothing; ``DeliveryPointNotFound`` when the member
+      lists no such point;
+    * without it, ``point`` is merged by id (REQ-0027).
+
+    Returns how many meters were relinked. Nothing is committed here.
+    """
+    # The member's row first, as every write that can make it hold something
+    # does (`sensors.lock_member`): a reactivation of this member, a meter
+    # attach naming the old point, or another delivery-point write waits here.
+    await lock_member(session, member)
+
+    existing = [dict(dp) for dp in (member.delivery_points or [])]
+    old_norm: str | None = None
+    if replaces is not None:
+        old_norm = normalise_delivery_point_id(replaces)
+        if old_norm is None or not any(
+            normalise_delivery_point_id(dp.get("id")) == old_norm for dp in existing
+        ):
+            raise DeliveryPointNotFound(f"Delivery point {replaces!r} not found")
+
+    if member.status == ACTIVE:
+        await ensure_delivery_points_free(
+            session,
+            community_id=community.id,
+            member_id=member.id,
+            point_ids=[normalise_delivery_point_id(point.id)],
+        )
+
+    if old_norm is not None:
+        existing = [
+            dp
+            for dp in existing
+            if normalise_delivery_point_id(dp.get("id")) != old_norm
+        ]
+    member.delivery_points = merge_delivery_point(existing, point)
+    await session.flush()
+
+    if replaces is None:
+        return 0
+    return await relink_meters(session, member, replaces, point.id)
+
+
+async def remove_unlinked_delivery_point(
+    session: AsyncSession, member: Member, point_id: str
+) -> None:
+    """Remove one delivery point, unless a meter of the member still names it.
+
+    ``DeliveryPointNotFound`` when the member lists no point with exactly this
+    id (REQ-0027); ``DeliveryPointLinked`` when one of its meters' ``pod``
+    names it, trimmed and case-insensitively (REQ-0084). Under the member's
+    row lock, which a meter attach takes too, so a meter cannot be linked to
+    the point between the check and the removal. Nothing is committed here.
+    """
+    await lock_member(session, member)
+    existing = member.delivery_points or []
+    if not any(dp.get("id") == point_id for dp in existing):
+        raise DeliveryPointNotFound(f"Delivery point {point_id!r} not found")
+    linked = await _member_meters_naming(session, member, point_id)
+    if linked:
+        raise DeliveryPointLinked(
+            f"Delivery point {point_id!r} is still named by {len(linked)} of the "
+            "member's meter(s); correct it with `replaces`, or detach them, first"
+        )
+    member.delivery_points = remove_delivery_point(existing, point_id)
+    await session.flush()
+
+
 def merge_topology_node(
     existing: Sequence[dict[str, Any]], node: TopologyNodeIn
 ) -> list[dict[str, Any]]:
@@ -514,6 +664,18 @@ async def create_member(
             ),
         )
 
+    # The same for its delivery points (REQ-0085), after the sensor locks:
+    # sensors before delivery points is the order every write takes them in.
+    if member_in.status == ACTIVE and member_in.delivery_points:
+        await ensure_delivery_points_free(
+            session,
+            community_id=community.id,
+            member_id=None,
+            point_ids=(
+                normalise_delivery_point_id(p.id) for p in member_in.delivery_points
+            ),
+        )
+
     member = Member(
         community_id=community.id,
         key=key,
@@ -555,12 +717,13 @@ async def ensure_reactivation_allowed(
     session: AsyncSession, community: Community, member: Member, new_status: str | None
 ) -> None:
     """Refuse a move to ``active`` while another active member holds one of
-    this member's sensors (REQ-0069).
+    this member's sensors (REQ-0069) or delivery points (REQ-0085).
 
     Only an active member holds a sensor, so a member that was not active held
     nothing, and another member may have been given its meter meanwhile.
-    Reactivating it then would make two holders. Raises ``SensorHeld``; the
-    caller changes nothing. A member already active is not re-checked.
+    Reactivating it then would make two holders. Raises ``SensorHeld`` or
+    ``DeliveryPointHeld`` — sensors first, in the lock order — and the caller
+    changes nothing. A member already active is not re-checked.
 
     The member's row is locked first and its status and sensor ids read after
     the lock, so an attach to this member running at the same moment is
@@ -578,6 +741,14 @@ async def ensure_reactivation_allowed(
         community_id=community.id,
         member_id=member.id,
         sensor_ids=await member_sensor_ids(session, member.id),
+    )
+    # Read after the row lock, which refreshed the member: a delivery-point
+    # write committed meanwhile is among them.
+    await ensure_delivery_points_free(
+        session,
+        community_id=community.id,
+        member_id=member.id,
+        point_ids=member_delivery_point_ids(member.delivery_points),
     )
 
 

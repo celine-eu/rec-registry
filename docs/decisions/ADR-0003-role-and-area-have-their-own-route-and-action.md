@@ -1,7 +1,7 @@
 # ADR-0003 — role and area are written through their own route and action, and no caller-supplied id can change an action
 
 **Date:** 2026-09-27
-**Status:** accepted
+**Status:** accepted; amended by ADR-0011
 
 ## Context
 

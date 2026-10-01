@@ -68,8 +68,56 @@ allow if {
     ])
 }
 
+# One field group of a member, one action, one scope (REQ-0081, REQ-0082).
+# Each rule lists the grants that already wrote that field before its narrow
+# route existed, so no caller loses a write: `members.write` (the general
+# PATCH), `members.profile.write` for role and area (PATCH …/profile), and
+# `.admin`. A holder of one field's scope alone reaches only that field's
+# route: `members.area.write` does not write a name, a role or a delivery
+# point. Adding a field group is one rule here (ADR-0011).
+allow if {
+    input.action.name == "members.name.write"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.members.name.write",
+        "rec-registry.members.write",
+        "rec-registry.admin",
+    ])
+}
+
+allow if {
+    input.action.name == "members.role.write"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.members.role.write",
+        "rec-registry.members.profile.write",
+        "rec-registry.members.write",
+        "rec-registry.admin",
+    ])
+}
+
+allow if {
+    input.action.name == "members.area.write"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.members.area.write",
+        "rec-registry.members.profile.write",
+        "rec-registry.members.write",
+        "rec-registry.admin",
+    ])
+}
+
+# PUT|DELETE …/members/{key}/delivery-points/{id}, with or without
+# `?replaces=` (REQ-0084): the route segment is hyphenated, the action and the
+# scope use an underscore.
+allow if {
+    input.action.name == "members.delivery_points.write"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.members.delivery_points.write",
+        "rec-registry.members.write",
+        "rec-registry.admin",
+    ])
+}
+
 # Create/update assets. Delivery points are not assets: their writes live under
-# `…/members/{key}/delivery-points/…` and derive `members.write`.
+# `…/members/{key}/delivery-points/…` and derive `members.delivery_points.write`.
 allow if {
     input.action.name == "assets.write"
     data.celine.scopes.has_any_scope([
@@ -140,6 +188,18 @@ reason := "admin access granted" if {
 } else := "member profile write access granted" if {
     allow
     input.action.name == "members.profile.write"
+} else := "member name write access granted" if {
+    allow
+    input.action.name == "members.name.write"
+} else := "member role write access granted" if {
+    allow
+    input.action.name == "members.role.write"
+} else := "member area write access granted" if {
+    allow
+    input.action.name == "members.area.write"
+} else := "member delivery point write access granted" if {
+    allow
+    input.action.name == "members.delivery_points.write"
 } else := "member purge access granted" if {
     allow
     input.action.name == "members.purge"

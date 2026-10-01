@@ -187,7 +187,14 @@ class TestTheRename:
         c = await _community(live_client)
         other = await _community(live_client, "example-rec-2")
         await _add(live_client, c, "ex-00001", "kc-0001")
-        await _add(live_client, other, "ex-00001", "kc-0001")
+        # Its own POD: one delivery point has one active holder (REQ-0085).
+        await _add(
+            live_client,
+            other,
+            "ex-00001",
+            "kc-0001",
+            delivery_points=[{"id": "IT001E00000091", "type": "pod"}],
+        )
 
         r = await live_client.post(RENAME.format(c=c, a="north"), json={"new_key": "nord"})
 

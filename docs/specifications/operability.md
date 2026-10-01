@@ -141,8 +141,9 @@ id:
   `/delivery-points/` on the member delivery-point `PUT` and `DELETE`;
 - the `cursor` query value of the `…/assets`, `…/meters` and `…/delivery-points` listings,
   which is an asset key or a delivery-point id, is logged as `{redacted}`, and so is a
-  `sensor_id`, `sensor_ids`, `user_id`, `user_ids`, `dp_id`, `dp_ids`, `delivery_point_id`
-  or `delivery_point_ids` query value on any route (no route takes one today).
+  `sensor_id`, `sensor_ids`, `user_id`, `user_ids`, `dp_id`, `dp_ids`, `delivery_point_id`,
+  `delivery_point_ids` or `replaces` query value on any route — `replaces` is the old POD of
+  a delivery-point correction (REQ-0084); no route takes the others today.
 
 A meter's asset key is `meter-<sensor_id>`, so without this every attach, detach and lookup
 wrote a member's sensor id — the key that joins them to their readings — to the log, where
