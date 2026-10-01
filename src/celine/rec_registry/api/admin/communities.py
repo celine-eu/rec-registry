@@ -16,6 +16,7 @@ from sqlalchemy import select
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.core.settings import settings
+from celine.rec_registry.services.delivery_points import community_duplicates
 from celine.rec_registry.schemas.models import (
     # Community
     CommunityListItem,
@@ -30,6 +31,9 @@ from celine.rec_registry.schemas.models import (
     # Delivery Points
     DeliveryPointWithOwner,
     DeliveryPointLookup,
+    DeliveryPointDuplicates,
+    DuplicateDeliveryPoint,
+    DuplicateHolder,
     MemberRef,
     # Assets
     AssetListItem,
@@ -350,6 +354,51 @@ async def list_delivery_points(
     next_cursor = page[-1].key if len(page) == limit else None
 
     return PaginatedResponse(items=page, next_cursor=next_cursor)
+
+
+@router.get(
+    "/communities/{community_key}/delivery-points/duplicates",
+    response_model=DeliveryPointDuplicates,
+)
+async def list_duplicate_delivery_points(
+    community_key: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """The community's delivery points that more than one active member holds (REQ-0087).
+
+    For each point an active member of this community holds and another
+    active member — here or in any other community — also holds: the point in
+    its compared form (trimmed, lower-cased), this community's holders by
+    member key with the spelling each stored, how many active members of
+    other communities hold it, and the total. Holders in other communities are
+    a count only: never their member, never their community (REQ-0085).
+    Members who are not `active` hold nothing.
+
+    The per-community view of `celine-rec-registry duplicate-delivery-points`
+    (REQ-0086), for an operator console: these are the points the registry
+    will refuse to give, re-give or reactivate (`delivery_point_held`) until
+    resolved. A read: `rec-registry.read`. Not paginated.
+    """
+    c = await session.scalar(select(Community).where(Community.key == community_key))
+    if c is None:
+        raise HTTPException(status_code=404, detail="Community not found")
+
+    found = await community_duplicates(session, c.id, c.key)
+    return DeliveryPointDuplicates(
+        community_key=c.key,
+        items=[
+            DuplicateDeliveryPoint(
+                delivery_point=d.point_id,
+                holders=[
+                    DuplicateHolder(member_key=member_key, id=stored_id)
+                    for member_key, stored_id in d.holders
+                ],
+                held_elsewhere=d.held_elsewhere,
+                active_holders=len({m for m, _ in d.holders}) + d.held_elsewhere,
+            )
+            for d in found
+        ],
+    )
 
 
 @router.get(

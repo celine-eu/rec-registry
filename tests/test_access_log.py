@@ -187,6 +187,24 @@ class TestRedactPath:
             == f"/anything?limit=1&{name}={{redacted}}"
         )
 
+    def test_the_duplicates_read_is_a_route_not_an_id(self):
+        """`…/delivery-points/duplicates` (REQ-0087) is a fixed segment and is
+        logged as it is; a member's delivery point named `duplicates` is still
+        an id.
+
+        @verifies REQ-0080
+        """
+        path = f"/admin/communities/{C}/delivery-points/duplicates"
+        assert redact_path(path) == path
+        assert (
+            redact_path(f"/admin/communities/{C}/members/ex-00001/delivery-points/duplicates")
+            == f"/admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}}"
+        )
+        assert (
+            redact_path(f"/admin/communities/{C}/delivery-points/duplicates/{DP}")
+            == f"/admin/communities/{C}/delivery-points/{{dp_id}}"
+        )
+
     def test_the_pod_a_correction_replaces_is_redacted(self):
         """`PUT …/delivery-points/{new}?replaces={old}` (REQ-0084) carries two
         PODs: the new one in the path and the old one in the query.

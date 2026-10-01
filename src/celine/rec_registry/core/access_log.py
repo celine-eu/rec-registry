@@ -56,6 +56,10 @@ _PATH_TAILS = (
 # in it 404s, and would still be logged whole otherwise).
 _ASSET_KEY_IN_PATH = re.compile(r"(/assets/)(?!by-sensor-id/)[^?#]+")
 _DP_ID_IN_PATH = re.compile(r"(/delivery-points/)(?!by-id/)[^?#]+")
+# `GET /admin/communities/{key}/delivery-points/duplicates` (REQ-0087): a fixed
+# segment, not an id, so it is logged as it is. Only on the community route;
+# a member's point named `duplicates` is still an id.
+_DUPLICATES_REPORT = re.compile(r"/admin/communities/[^/]+/delivery-points/duplicates")
 # Listings whose pagination cursor is an asset key or a delivery-point id.
 _ID_CURSOR_LISTING = re.compile(r"/(assets|meters|delivery-points)/?$")
 
@@ -96,7 +100,8 @@ def redact_path(path_with_query: str) -> str:
     for pattern, marker in _PATH_TAILS:
         path = pattern.sub(lambda m, marker=marker: m.group(1) + marker, path)
     path = _ASSET_KEY_IN_PATH.sub(lambda m: m.group(1) + ASSET_KEY_MARKER, path)
-    path = _DP_ID_IN_PATH.sub(lambda m: m.group(1) + DP_ID_MARKER, path)
+    if not _DUPLICATES_REPORT.fullmatch(path):
+        path = _DP_ID_IN_PATH.sub(lambda m: m.group(1) + DP_ID_MARKER, path)
     if sep:
         return f"{path}?{_redact_query(path, query)}"
     return path

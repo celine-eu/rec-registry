@@ -112,6 +112,40 @@ the check blocks either. Decided in
 [ADR-0013](../decisions/ADR-0013-duplicate-delivery-points-are-reported-to-the-operator.md),
 which amends ADR-0012.
 
+### REQ-0087 — a community's shared delivery points are readable per community, naming no one outside it
+
+`GET /admin/communities/{ck}/delivery-points/duplicates` answers `200` with
+`{"community_key": "<ck>", "items": [...]}`: one item per delivery point that an **active**
+member of this community holds and at least one other **active** member also holds — in this
+community or any other — sorted by point:
+
+| Field | Value |
+|---|---|
+| `delivery_point` | the point in its compared form, trimmed and lower-cased (REQ-0085) |
+| `holders` | `[{"member_key", "id"}]`: each active holder **in this community**, by member key, with the spelling its row stores; a member storing the point under two spellings appears once per spelling |
+| `held_elsewhere` | how many active members of **other** communities hold it — a count, never a member key, never a community |
+| `active_holders` | every active member holding it, here and elsewhere |
+
+A point held twice only in other communities is not listed; a point only this community's one
+member holds is not either, even listed twice by that member. Members who are not `active` hold
+nothing. No duplicates is `{"community_key": "<ck>", "items": []}`; an unknown community is
+`404` (plain `{"detail"}`, as the other community reads). It is not paginated.
+
+**Who is a duplicate is decided by REQ-0086's finder**, `find_duplicate_delivery_points` in
+`core/delivery_point_id.py`, fed one query's rows — every active holder of every point this
+community's active members hold — so the read and the CLI report cannot disagree. Holders
+outside the community are counted, never named, as the `delivery_point_held` refusal does not
+name them (REQ-0085).
+
+It is a read: any `GET` under `/admin` derives `read` (REQ-0001), so `rec-registry.read` — which
+the operator console's onboarding holds — or `.admin` reaches it, and no write or other grant
+does. `duplicates` is a fixed route segment: any other method on it derives `admin`
+(REQ-0065), a community keyed `duplicates` derives what any key derives, and a member's
+delivery point named `duplicates` is still a delivery-point write. The path is logged as it is,
+not as a delivery-point id (REQ-0080). The CLI report (REQ-0086) stays the cross-community view.
+Decided in
+[ADR-0014](../decisions/ADR-0014-a-communitys-shared-delivery-points-are-readable-per-community.md).
+
 ### REQ-0077 — the CLI reports members whose role, status or area is out of set, and writes nothing
 
 `celine-rec-registry out-of-set-values` reads every community through `GET /admin/export` and
@@ -167,7 +201,8 @@ id:
   which is an asset key or a delivery-point id, is logged as `{redacted}`, and so is a
   `sensor_id`, `sensor_ids`, `user_id`, `user_ids`, `dp_id`, `dp_ids`, `delivery_point_id`,
   `delivery_point_ids` or `replaces` query value on any route — `replaces` is the old POD of
-  a delivery-point correction (REQ-0084); no route takes the others today.
+  a delivery-point correction (REQ-0084); no route takes the others today. A community's
+  `…/delivery-points/duplicates` (REQ-0087) is a route, not an id, and is logged as it is.
 
 A meter's asset key is `meter-<sensor_id>`, so without this every attach, detach and lookup
 wrote a member's sensor id — the key that joins them to their readings — to the log, where

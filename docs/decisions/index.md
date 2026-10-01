@@ -51,3 +51,4 @@ edited to say something else.
 | [ADR-0011](ADR-0011-member-writes-are-granted-per-field.md) | a member's fields are written through per-field routes, each with its own grant |
 | [ADR-0012](ADR-0012-a-delivery-point-has-one-active-holder-and-is-corrected-in-one-write.md) | a delivery point has one active holder across the registry, and is corrected in one write |
 | [ADR-0013](ADR-0013-duplicate-delivery-points-are-reported-to-the-operator.md) | delivery points already held twice are reported to the operator, as sensors are |
+| [ADR-0014](ADR-0014-a-communitys-shared-delivery-points-are-readable-per-community.md) | a community's shared delivery points are readable over HTTP, per community, naming no one outside it |

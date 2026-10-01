@@ -272,6 +272,8 @@ HOSTILE_WORDS = [
     "area",
     "delivery_points",
     "replaces",
+    "duplicates",
+    "by-id",
 ]
 
 
@@ -288,6 +290,7 @@ ROUTES = [
     ("GET", "/admin/communities/{id}/assets/by-sensor-id/{id}", "read"),
     ("GET", "/admin/communities/{id}/members/by-user-id/{id}", "read"),
     ("GET", "/admin/communities/{id}/delivery-points/by-id/{id}", "read"),
+    ("GET", "/admin/communities/{id}/delivery-points/duplicates", "read"),
     ("PATCH", "/admin/communities/{id}", "community.write"),
     ("PUT", "/admin/communities/{id}/areas/{id}", "community.write"),
     ("DELETE", "/admin/communities/{id}/areas/{id}", "community.write"),
@@ -774,3 +777,79 @@ class TestPerFieldGrantsThroughTheMiddleware:
         ):
             block = rego.split(f'input.action.name == "{name}"', 1)[1].split("}", 1)[0]
             assert '"rec-registry.admin"' in block, name
+
+
+class TestTheDuplicatesReadIsARead:
+    """`GET …/delivery-points/duplicates` (REQ-0087) is a read on the community,
+    like every other community-scoped delivery-point read."""
+
+    PATH = "/admin/communities/rec-a/delivery-points/duplicates"
+
+    def test_it_derives_read_and_any_write_on_it_is_no_route(self):
+        """@verifies REQ-0087"""
+        assert action(None, self.PATH, "GET") == "read"
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            assert action(None, self.PATH, method) == "admin", method
+
+    @pytest.mark.parametrize("key", ["duplicates", "by-id", "delivery-points", "lookup"])
+    def test_a_hostile_community_key_derives_nothing_else(self, key):
+        """@verifies REQ-0087
+        @verifies REQ-0065"""
+        path = f"/admin/communities/{key}/delivery-points/duplicates"
+        assert action(None, path, "GET") == "read"
+        assert action(None, path, "PUT") == "admin"
+        # A member's point named `duplicates` is still a delivery-point write.
+        assert (
+            action(None, f"/admin/communities/{key}/members/m1/delivery-points/duplicates", "PUT")
+            == "members.delivery_points.write"
+        )
+
+    def _client(self, monkeypatch, scopes: str):
+        from celine.sdk.auth import JwtUser
+        from fastapi import FastAPI, HTTPException
+        from fastapi.testclient import TestClient
+
+        from celine.rec_registry.api.admin.communities import (
+            router as communities_router,
+        )
+        from celine.rec_registry.core import middleware as mw
+        from celine.rec_registry.db.session import get_session
+
+        monkeypatch.setattr(mw.settings, "policies_enabled", True)
+        monkeypatch.setattr(mw.settings, "policies_cache_enabled", False)
+
+        async def as_caller(self, request):
+            return JwtUser(sub="svc-example", claims={"scope": scopes})
+
+        monkeypatch.setattr(mw.PolicyMiddleware, "_extract_user", as_caller)
+
+        app = FastAPI()
+        app.add_middleware(mw.PolicyMiddleware)
+        app.include_router(communities_router, prefix="/admin")
+
+        async def reached_the_route():
+            raise HTTPException(status_code=418, detail="reached the route")
+            yield  # pragma: no cover
+
+        app.dependency_overrides[get_session] = reached_the_route
+        return TestClient(app)
+
+    @pytest.mark.parametrize("scope", ["rec-registry.read", "rec-registry.admin"])
+    def test_the_read_grant_reaches_it(self, monkeypatch, scope):
+        """@verifies REQ-0087"""
+        assert self._client(monkeypatch, scope).get(self.PATH).status_code == 418
+
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "rec-registry.members.write",
+            "rec-registry.members.delivery_points.write",
+            "rec-registry.export",
+            "rec-registry.lookup",
+            "rec-registry.community.write",
+            "",
+        ],
+    )
+    def test_no_other_grant_reaches_it(self, monkeypatch, scope):
+        """@verifies REQ-0087"""
+        assert self._client(monkeypatch, scope).get(self.PATH).status_code == 403

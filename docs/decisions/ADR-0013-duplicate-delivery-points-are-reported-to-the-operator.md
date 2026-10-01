@@ -1,7 +1,7 @@
 # ADR-0013 — delivery points already held twice are reported to the operator
 
 **Date:** 2026-10-01
-**Status:** accepted
+**Status:** accepted; amended by ADR-0014
 
 ## Context
 

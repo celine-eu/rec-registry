@@ -34,7 +34,9 @@ from celine.rec_registry.core.area_boundary import (
     area_boundary_refusals,
     area_key_refusals,
 )
-from celine.rec_registry.core.delivery_point_id import normalise_delivery_point_id
+# `find_duplicate_delivery_points` lives with the compared form, so the CLI and
+# the per-community read (REQ-0087) share one definition of a duplicate.
+from celine.rec_registry.core.delivery_point_id import find_duplicate_delivery_points
 from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.sensor_id import normalise_sensor_id
 
@@ -1183,42 +1185,6 @@ def duplicate_sensors(
 # =============================================================================
 # Duplicate Delivery Points Report
 # =============================================================================
-
-
-def find_duplicate_delivery_points(
-    bundles: list[dict[str, Any]],
-) -> list[tuple[str, list[tuple[str, str]]]]:
-    """Every delivery point held by more than one active member (REQ-0086).
-
-    Reads exported bundles, as `GET /admin/export` answers them, and returns
-    ``(delivery point, [(community key, member key), …])`` sorted by point.
-    Only an ``active`` member holds a point (REQ-0085), and ids are compared
-    trimmed and lower-cased — by ``normalise_delivery_point_id``, the
-    registry's own definition — so ` IT001E…`, `it001e…` and `IT001E…` are one,
-    reported in that compared form. A member listing one point twice is one
-    holder, not two.
-    """
-    holders: dict[str, set[tuple[str, str]]] = {}
-    for bundle in bundles:
-        if not isinstance(bundle, dict):
-            continue
-        community_key = str((bundle.get("community") or {}).get("id", ""))
-        for member_key, member in (bundle.get("members") or {}).items():
-            if not isinstance(member, dict) or member.get("status") != "active":
-                continue
-            for point in member.get("delivery_points") or []:
-                if not isinstance(point, dict):
-                    continue
-                point_id = normalise_delivery_point_id(point.get("id"))
-                if point_id:
-                    holders.setdefault(point_id, set()).add(
-                        (community_key, str(member_key))
-                    )
-    return [
-        (point_id, sorted(held_by))
-        for point_id, held_by in sorted(holders.items())
-        if len(held_by) > 1
-    ]
 
 
 @app.command("duplicate-delivery-points")

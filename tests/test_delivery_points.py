@@ -692,6 +692,222 @@ class TestTheDuplicatesReportAgainstAnExport:
 
 
 # =============================================================================
+# F8: the per-community duplicate read (REQ-0087)
+# =============================================================================
+
+
+async def _activate_past_the_check(pg_engine, *member_keys: str) -> None:
+    """Make members active as if written before REQ-0085 existed."""
+    async with pg_engine.begin() as conn:
+        await conn.execute(
+            text("update member set status = 'active' where key = any(:keys)"),
+            {"keys": list(member_keys)},
+        )
+
+
+async def _duplicates(client, community: str):
+    return await client.get(
+        f"/admin/communities/{community}/delivery-points/duplicates"
+    )
+
+
+@pytest.mark.integration
+class TestTheCommunityDuplicatesRead:
+    async def _two_communities(self, client, pg_engine) -> None:
+        """OLD: ex-00001 and ex-00002 in A, ex-00009 in B (spelled otherwise).
+        NEW: ex-00003 in A only. IT…05: ex-00007 and ex-00008, both in B."""
+        await _community(client, "example-rec-a")
+        await _community(client, "example-rec-b")
+        await _add(client, "ex-00001", 1, community="example-rec-a", pods=[OLD])
+        await _add(
+            client,
+            "ex-00002",
+            2,
+            community="example-rec-a",
+            pods=[OLD],
+            status="pending",
+        )
+        await _add(client, "ex-00003", 3, community="example-rec-a", pods=[NEW])
+        await _add(
+            client,
+            "ex-00009",
+            9,
+            community="example-rec-b",
+            pods=[f" {OLD.lower()}"],
+            status="pending",
+        )
+        await _add(
+            client, "ex-00007", 7, community="example-rec-b", pods=["IT001E00000005"]
+        )
+        await _add(
+            client,
+            "ex-00008",
+            8,
+            community="example-rec-b",
+            pods=["IT001E00000005"],
+            status="pending",
+        )
+        await _activate_past_the_check(pg_engine, "ex-00002", "ex-00009", "ex-00008")
+
+    async def test_names_this_communitys_holders_and_counts_the_others(
+        self, live_client, pg_engine
+    ):
+        """@verifies REQ-0087"""
+        await self._two_communities(live_client, pg_engine)
+
+        r = await _duplicates(live_client, "example-rec-a")
+
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "community_key": "example-rec-a",
+            "items": [
+                {
+                    "delivery_point": OLD.lower(),
+                    "holders": [
+                        {"member_key": "ex-00001", "id": OLD},
+                        {"member_key": "ex-00002", "id": OLD},
+                    ],
+                    "held_elsewhere": 1,
+                    "active_holders": 3,
+                }
+            ],
+        }
+
+    async def test_never_names_another_communitys_holder_or_community(
+        self, live_client, pg_engine
+    ):
+        """The F6 rule: from B, A's holders are a count, never a key.
+
+        @verifies REQ-0087
+        """
+        await self._two_communities(live_client, pg_engine)
+
+        r = await _duplicates(live_client, "example-rec-b")
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["items"] == [
+            {
+                "delivery_point": OLD.lower(),
+                "holders": [{"member_key": "ex-00009", "id": f" {OLD.lower()}"}],
+                "held_elsewhere": 2,
+                "active_holders": 3,
+            },
+            {
+                "delivery_point": "it001e00000005",
+                "holders": [
+                    {"member_key": "ex-00007", "id": "IT001E00000005"},
+                    {"member_key": "ex-00008", "id": "IT001E00000005"},
+                ],
+                "held_elsewhere": 0,
+                "active_holders": 2,
+            },
+        ]
+        for leaked in ("example-rec-a", "ex-00001", "ex-00002", "ex-00003"):
+            assert leaked not in r.text
+
+    async def test_agrees_with_the_cli_report(self, live_client, pg_engine):
+        """Same finder: every point the CLI lists with a holder here is listed
+        here, with the same holders.
+
+        @verifies REQ-0087
+        @verifies REQ-0086
+        """
+        import yaml
+
+        from celine.rec_registry.cli.main import find_duplicate_delivery_points
+
+        await self._two_communities(live_client, pg_engine)
+        exported = await live_client.get("/admin/export")
+        report = find_duplicate_delivery_points(
+            [d for d in yaml.safe_load_all(exported.text) if d]
+        )
+
+        for community in ("example-rec-a", "example-rec-b"):
+            body = (await _duplicates(live_client, community)).json()
+            expected = [
+                (point, sorted(m for c, m in held if c == community), len(held))
+                for point, held in report
+                if any(c == community for c, _ in held)
+            ]
+            got = [
+                (
+                    i["delivery_point"],
+                    sorted({h["member_key"] for h in i["holders"]}),
+                    i["active_holders"],
+                )
+                for i in body["items"]
+            ]
+            assert got == expected, community
+
+    @pytest.mark.parametrize("status", ["inactive", "suspended", "pending"])
+    async def test_a_member_who_is_not_active_is_not_counted(self, live_client, status):
+        """@verifies REQ-0087"""
+        await _community(live_client, "example-rec-a")
+        await _community(live_client, "example-rec-b")
+        await _add(live_client, "ex-00001", 1, community="example-rec-a", pods=[OLD])
+        await _add(
+            live_client,
+            "ex-00002",
+            2,
+            community="example-rec-a",
+            pods=[OLD],
+            status=status,
+        )
+        await _add(
+            live_client,
+            "ex-00009",
+            9,
+            community="example-rec-b",
+            pods=[OLD],
+            status=status,
+        )
+
+        for community in ("example-rec-a", "example-rec-b"):
+            r = await _duplicates(live_client, community)
+            assert r.status_code == 200, r.text
+            assert r.json()["items"] == [], community
+
+    async def test_one_member_listing_a_point_twice_is_not_a_duplicate(
+        self, live_client, pg_engine
+    ):
+        """@verifies REQ-0087"""
+        await _community(live_client)
+        await _add(live_client, "ex-00001", 1, pods=[OLD, OLD.lower()])
+
+        r = await _duplicates(live_client, C)
+
+        assert r.json() == {"community_key": C, "items": []}
+
+    async def test_an_unknown_community_is_404(self, live_client):
+        """@verifies REQ-0087"""
+        r = await _duplicates(live_client, "nowhere")
+        assert r.status_code == 404
+
+
+class TestTheDuplicatesReadIsPublished:
+    def test_the_route_and_its_body_are_in_the_openapi_document(self):
+        """@verifies REQ-0087"""
+        from celine.rec_registry.main import create_app
+
+        doc = create_app().openapi()
+        get = doc["paths"][
+            "/admin/communities/{community_key}/delivery-points/duplicates"
+        ]["get"]
+        ok = get["responses"]["200"]["content"]["application/json"]["schema"]
+        assert ok == {"$ref": "#/components/schemas/DeliveryPointDuplicates"}
+        item = doc["components"]["schemas"]["DuplicateDeliveryPoint"]
+        assert set(item["properties"]) == {
+            "delivery_point",
+            "holders",
+            "held_elsewhere",
+            "active_holders",
+        }
+        holder = doc["components"]["schemas"]["DuplicateHolder"]
+        assert set(holder["properties"]) == {"member_key", "id"}
+
+
+# =============================================================================
 # Two writers at once
 # =============================================================================
 

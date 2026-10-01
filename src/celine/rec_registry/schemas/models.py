@@ -186,6 +186,43 @@ class DeliveryPointsResponse(BaseModel):
 # =============================================================================
 
 
+class DuplicateHolder(BaseModel):
+    """An active member of the addressed community holding a shared point."""
+
+    member_key: str
+    id: str = Field(description="The delivery point as this member's row stores it.")
+
+
+class DuplicateDeliveryPoint(BaseModel):
+    """One delivery point of the community that more than one active member holds."""
+
+    delivery_point: str = Field(
+        description=(
+            "The point in its compared form: trimmed and lower-cased, as the "
+            "registry compares delivery points (REQ-0085)."
+        )
+    )
+    holders: list[DuplicateHolder] = Field(
+        description="This community's active holders, by member key, with their stored spelling."
+    )
+    held_elsewhere: int = Field(
+        description=(
+            "How many active members of other communities hold it. They are "
+            "never named, nor their communities."
+        )
+    )
+    active_holders: int = Field(
+        description="Every active member holding it, here and elsewhere."
+    )
+
+
+class DeliveryPointDuplicates(BaseModel):
+    """`GET …/communities/{key}/delivery-points/duplicates` (REQ-0087)."""
+
+    community_key: str
+    items: list[DuplicateDeliveryPoint] = Field(default_factory=list)
+
+
 class DeliveryPointWithOwner(BaseModel):
     id: str
     key: str

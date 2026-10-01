@@ -50,6 +50,7 @@ task run
 | `PUT\|DELETE /admin/communities/{key}/members/{member}/assets/meter-{sensor_id}` | Attach or detach a meter; one active holder per sensor id (`409 sensor_held`) |
 | `PATCH /admin/communities/{key}/members/{member}/profile` | Correct a member's role and area, nothing else (`members.profile.write`) |
 | `PUT /admin/communities/{key}/members/{member}/name\|role\|area` | Set one field of a member, granted per field (`members.name.write`, `members.role.write`, `members.area.write`) |
+| `GET /admin/communities/{key}/delivery-points/duplicates` | This community's PODs another active member also holds; holders elsewhere only counted (`read`) |
 | `PUT\|DELETE /admin/communities/{key}/members/{member}/delivery-points/{id}` | Add or remove a delivery point (`members.delivery_points.write`); `?replaces={old}` corrects one and relinks its meters in one write; one active holder per POD (`409 delivery_point_held`); a point a meter names is not deleted (`409 delivery_point_linked`) |
 | `PATCH /admin/communities/{key}` | Update community metadata (areas have their own route) |
 | `PUT\|DELETE /admin/communities/{key}/areas/{area}` | Add, replace or remove one area; an area is one GSE primary substation (`422 invalid_area_boundary`) under an area key (`422 invalid_area_key`) |

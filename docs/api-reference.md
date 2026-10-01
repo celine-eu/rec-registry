@@ -196,6 +196,34 @@ Paginated list of all delivery points in a community.
 - `active` — filter by active status
 - `limit`, `cursor` — pagination
 
+### `GET /admin/communities/{community_key}/delivery-points/duplicates`
+
+The community's delivery points that more than one **active** member holds — the
+per-community view of `celine-rec-registry duplicate-delivery-points`, for an operator console.
+A read (`rec-registry.read`). Not paginated.
+
+```json
+{
+  "community_key": "example-rec",
+  "items": [
+    {
+      "delivery_point": "it001e00000001",
+      "holders": [
+        {"member_key": "ex-00001", "id": "IT001E00000001"},
+        {"member_key": "ex-00002", "id": "it001e00000001"}
+      ],
+      "held_elsewhere": 1,
+      "active_holders": 3
+    }
+  ]
+}
+```
+
+`delivery_point` is the compared form (trimmed, lower-cased); `holders` are this community's
+active holders with the spelling each stored; `held_elsewhere` counts active holders in other
+communities, which are never named, nor their communities. A point shared only between other
+communities is not listed. Unknown community: `404`.
+
 ### `GET /admin/communities/{community_key}/delivery-points/by-id/{dp_id}`
 
 Lookup a specific delivery point by its ID.
@@ -477,8 +505,9 @@ unknown point is `404`.
 `celine-rec-registry duplicate-delivery-points` — a read-only CLI report over
 `GET /admin/export` (the export grant), one tab-separated line per active holder:
 `delivery_point  community  member  active_holders`, the point trimmed and lower-cased; exit
-`0` none, `1` some, `2` unreadable. There is no HTTP route for it, as there is none for
-`duplicate-sensors`.
+`0` none, `1` some, `2` unreadable. One community's share of the same list is
+`GET /admin/communities/{community_key}/delivery-points/duplicates` (a read; holders in other
+communities counted, not named).
 
 ### `PUT|DELETE /admin/communities/{ck}/members/{mk}/assets/{asset_key}`
 
