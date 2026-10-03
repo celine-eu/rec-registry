@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from celine.rec_registry.core.access_log import install_access_log_redaction
 from celine.rec_registry.core.errors import install_error_handlers
 from celine.rec_registry.core.middleware import PolicyMiddleware
+from celine.rec_registry.core.posture import enforce_posture
+from celine.rec_registry.core.settings import settings
 from celine.rec_registry.core.versions import CURRENT_SCHEMA_VERSION, api_version
 from celine.rec_registry.api.meta import router as meta_router
 from celine.rec_registry.api.user import router as user_router
@@ -18,6 +20,12 @@ from celine.rec_registry.api.admin.management import router as management_router
 
 
 def create_app():
+    # Refuse development defaults before anything acts on them (REQ-0088): the
+    # policy engine is loaded by the middleware below, and the first request
+    # opens the database pool. Only CELINE_ENV=dev relaxes this; unset is
+    # hardened.
+    enforce_posture(settings)
+
     # The two values here are derived for the same reason `/version` derives its
     # own (REQ-0058): they were literals, and literals nobody reads drift. This
     # pair drifts *further* than most, because `info.version` is what
@@ -33,13 +41,16 @@ def create_app():
         version=api_version(),
     )
 
-    # Add policy middleware for authentication and authorization
-    # Configuration via environment variables:
-    # - AUTH_ENABLED: Enable JWT authentication
-    # - AUTH_VERIFY_JWT: Verify JWT signatures
-    # - AUTH_JWKS_URI: JWKS endpoint for verification
-    # - POLICIES_ENABLED: Enable policies service integration
-    # - POLICIES_URL: Policies service URL
+    # Authentication and in-process authorization. Configured by (see
+    # core/settings.py and .env.example):
+    # - CELINE_OIDC_BASE_URL, CELINE_OIDC_JWKS_URI, CELINE_OIDC_AUDIENCE: the
+    #   issuer and keys every JWT is verified against (always verified)
+    # - AUTH_ENABLED, AUTH_HEADER_NAME: optional user extraction on paths
+    #   outside /admin and /user, which always require a JWT
+    # - POLICIES_ENABLED, POLICIES_DIR, POLICIES_DATA_DIR, POLICIES_PACKAGE,
+    #   POLICIES_CACHE_*: the Rego bundle evaluated in-process for /admin
+    # Turning AUTH_ENABLED or POLICIES_ENABLED off is refused unless
+    # CELINE_ENV=dev (REQ-0088).
     app.add_middleware(PolicyMiddleware)
 
     # Refusals a caller acts on answer {"detail", "code"} (REQ-0073).

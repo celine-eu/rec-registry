@@ -62,7 +62,11 @@ class CLISettings(BaseSettings):
         description="Verify TLS on OIDC/Keycloak requests",
     )
 
-    # Default client credentials (can be overridden per-command)
+    # Default client credentials. `celine-cli`/`celine-cli` is the local realm's
+    # convention (secret equal to id) and is a development value only: the
+    # commands take --client-id/--client-secret (REGISTRY_CLIENT_ID/_SECRET),
+    # and a secret equal to its client id is refused there unless
+    # CELINE_ENV=dev (REQ-0089).
     client_id: str | None = Field(
         default="celine-cli",
         description="Default OAuth2 client ID",

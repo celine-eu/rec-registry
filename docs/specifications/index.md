@@ -102,7 +102,7 @@ reports planned requirements as unverified.
 
 | | |
 |---|---|
-| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
+| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082, REQ-0088 – REQ-0089 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
 | REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069, REQ-0085 | [the registry model](registry-model.md) — what a community, member and asset are |
 | REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079, REQ-0083 – REQ-0084 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
@@ -113,8 +113,8 @@ reports planned requirements as unverified.
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
-same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080 and
-REQ-0081 – REQ-0087.
+same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080,
+REQ-0081 – REQ-0087 and REQ-0088 – REQ-0089.
 
 ## What is not covered
 
@@ -132,7 +132,8 @@ part that belongs to it.
 - **The middleware.** REQ-0001 – REQ-0008 pin `_get_admin_action`, a pure function, called
   directly. JWT parsing and verification, the decision cache, and the `401`/`403` a real
   request would receive are not exercised — the suite runs with `AUTH_ENABLED=false` and
-  `POLICIES_ENABLED=false`.
+  `POLICIES_ENABLED=false`, under `CELINE_ENV=dev` — the only signal
+  that lets the app start with them (REQ-0088).
 - **The migrations, beyond the shape they build.** `tests/test_migrations.py` runs
   `alembic upgrade head` into a throwaway schema and asserts it matches `Base.metadata`, so
   a model that drifts from `alembic/versions/` no longer passes. What that does not cover:

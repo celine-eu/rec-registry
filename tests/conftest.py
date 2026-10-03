@@ -1,6 +1,9 @@
 import os
 
 # Must be set before any app module imports so settings picks them up.
+# The suite runs with development switches (auth and policies off), which the
+# startup posture check refuses unless the environment says dev (REQ-0088).
+os.environ.setdefault("CELINE_ENV", "dev")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test_rec")
 os.environ.setdefault("AUTH_ENABLED", "false")
 os.environ.setdefault("POLICIES_ENABLED", "false")

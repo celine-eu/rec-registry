@@ -11,6 +11,7 @@
 
 | Variable | Description | Default |
 |---|---|---|
+| `CELINE_ENV` | Deployment posture; only `dev` accepts the development defaults below (`ENVIRONMENT` is read when it is unset). Read from the process environment, not `.env` | unset = hardened |
 | `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://postgres:securepassword123@host.docker.internal:15432/celine_rec_registry` |
 | `DATABASE_ECHO` | Log SQL statements | `false` |
 | `BASE_URL` | Public base URL of the service | `http://api.celine.localhost/rec-registry` |
@@ -18,13 +19,39 @@
 | `MAX_PAGE_SIZE` | Maximum pagination page size | `500` |
 | `AUTH_ENABLED` | Enable JWT authentication | `true` |
 | `AUTH_HEADER_NAME` | HTTP header for auth token | `authorization` |
-| `OIDC__*` | OIDC settings (from `celine-sdk`) | audience: `svc-rec-registry` |
+| `CELINE_OIDC_BASE_URL` | OIDC issuer (from `celine-sdk`) | local Keycloak (dev only) |
+| `CELINE_OIDC_JWKS_URI` | JWKS every JWT is verified against | local Keycloak (dev only) |
+| `CELINE_OIDC_AUDIENCE` | Expected token audience | `svc-rec-registry` |
+| `CELINE_OIDC_CLIENT_ID` / `CELINE_OIDC_CLIENT_SECRET` | The service's own client, if any | — |
 | `POLICIES_ENABLED` | Enable OPA policy evaluation | `true` |
 | `POLICIES_DIR` | Directory containing `.rego` files | `./policies` |
 | `POLICIES_DATA_DIR` | Optional directory for policy data JSON | — |
 | `POLICIES_PACKAGE` | OPA package to evaluate | `celine.rec_registry.access` |
 | `POLICIES_CACHE_ENABLED` | Enable in-memory decision cache | `true` |
 | `POLICIES_CACHE_TTL` | Cache TTL in seconds | `300` |
+
+## Development defaults and `CELINE_ENV`
+
+The defaults above are for the local stack, and the service refuses them unless
+`CELINE_ENV=dev` (REQ-0088). **Unset is hardened**, as is any value other than `dev`
+(`staging`, `prod`, a typo). Hardened, startup fails with `InsecureConfiguration` listing
+every one of these at once; in dev the same list is a single warning:
+
+- `DATABASE_URL` carrying a local-stack password (`securepassword123`, `postgres`);
+- `AUTH_ENABLED=false` or `POLICIES_ENABLED=false` — with policies off, any validly signed
+  token is a full administrator of `/admin`;
+- `CELINE_OIDC_BASE_URL` or `CELINE_OIDC_JWKS_URI` not set (the SDK's local Keycloak);
+- `CELINE_OIDC_CLIENT_SECRET` empty or equal to `CELINE_OIDC_CLIENT_ID`, when a client id
+  is set.
+
+`task run` and `task debug` export `CELINE_ENV=dev` unless it is already set, so the
+local runner needs nothing. `CELINE_ENV=staging task run` is the prod-like mode of the
+same entry point: it starts only with real values. The CLI applies the same rule to
+client credentials: a `--client-secret` equal to `--client-id` (the local
+`celine-cli`/`celine-cli`) is refused unless `CELINE_ENV=dev` (REQ-0089).
+
+The check lives in `celine.sdk.posture`, which needs the celine-sdk release after
+1.24.0; until it is published the SDK must be installed from source.
 
 ## Local Setup
 

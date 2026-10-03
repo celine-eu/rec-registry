@@ -245,6 +245,34 @@ profile route, the status route and a create. As for REQ-0064, the supersets liv
 policy rules and not in the shared matcher. Pinned by requests through the middleware with the
 policy engine on, for every scope against every member write.
 
+### REQ-0088 — outside `CELINE_ENV=dev` the service refuses to start on a development setting
+
+`create_app` checks its configuration before the policy middleware loads the Rego bundle
+and before any request can open the database pool, through `celine.sdk.posture`'s
+`PostureGuard` (`src/celine/rec_registry/core/posture.py`). It registers:
+
+| Setting | Refused when |
+|---|---|
+| `DATABASE_URL` | its password is a local-stack password (`securepassword123`, `postgres`) or trivially weak |
+| `AUTH_ENABLED` | `false` |
+| `POLICIES_ENABLED` | `false` — with the engine off `/admin` asks only for a validly signed token, so any token the issuer signs reads, writes and purges every community |
+| `CELINE_OIDC_BASE_URL`, `CELINE_OIDC_JWKS_URI` | not stated, so the SDK's local Keycloak default is in use |
+| `CELINE_OIDC_CLIENT_SECRET` | a client id is configured and the secret is empty or equal to it |
+
+The signal is `CELINE_ENV`, then `ENVIRONMENT`; the first non-empty one wins. **Only `dev`
+relaxes**: unset, empty, `staging`, `prod` or a typo is hardened. Hardened, startup raises
+`InsecureConfiguration` naming every violation at once; in dev the same list is logged as
+one warning and the service starts. `task run` exports `CELINE_ENV=dev` unless it is
+already set.
+
+### REQ-0089 — outside `CELINE_ENV=dev` the CLI refuses a client secret equal to its client id
+
+Before the client-credentials flow sends anything, the CLI checks the pair it was given
+(`--client-id`/`--client-secret`, or `REGISTRY_CLIENT_ID`/`REGISTRY_CLIENT_SECRET`). A
+secret that is empty or equal to its client id — the local realm's convention, of which
+`celine-cli`/`celine-cli` is the CLI's own — is refused with a non-zero exit unless the
+signal says `dev`, read as for REQ-0088. A `--token` and the password flow are not checked.
+
 ---
 
 ## What is not verified here
@@ -253,7 +281,8 @@ policy engine on, for every scope against every member write.
   called directly. Nothing exercises the surrounding request path: JWT parsing and
   verification, the policy engine's decision cache, or the `401` that an unauthenticated
   caller should receive. The suite runs with `AUTH_ENABLED=false` and
-  `POLICIES_ENABLED=false`.
+  `POLICIES_ENABLED=false`, under `CELINE_ENV=dev` — the only signal
+  that lets the app start with them (REQ-0088).
 - **Which community a write reaches.** Every grant is registry-wide: a holder of
   `rec-registry.assets.write` can write any community's assets, and a holder of
   `rec-registry.members.profile.write` (REQ-0063) or a field scope (REQ-0081) any community's

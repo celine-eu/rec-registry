@@ -29,6 +29,7 @@ import typer
 import yaml
 
 from celine.sdk.auth import OidcClientCredentialsProvider
+from celine.sdk.posture import InsecureConfiguration, PostureGuard
 from celine.rec_registry.cli.config import settings
 from celine.rec_registry.core.area_boundary import (
     area_boundary_refusals,
@@ -101,6 +102,26 @@ async def _get_token_from_password(
         return token_data["access_token"]
 
 
+def _enforce_client_credentials_posture(client_id: str, client_secret: str) -> None:
+    """Refuse a development client secret outside ``CELINE_ENV=dev``.
+
+    Locally every client's secret equals its id (``celine-cli``/``celine-cli``
+    is the CLI's own), so outside dev a secret equal to the id can only be a
+    default nobody replaced. In dev the guard warns and the CLI proceeds.
+    """
+    guard = PostureGuard("celine-rec-registry CLI")
+    guard.forbid_secret_equal_to_client_id(
+        "--client-secret / REGISTRY_CLIENT_SECRET",
+        client_id,
+        client_secret,
+        remediation="Pass the client's real secret, or a --token.",
+    )
+    try:
+        guard.enforce()
+    except InsecureConfiguration as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 def _resolve_auth(
     token: str | None,
     client_id: str | None,
@@ -123,7 +144,10 @@ def _resolve_auth(
         return token
 
     if client_id and client_secret:
-        # Client credentials flow
+        # Client credentials flow. A secret equal to its client id is the local
+        # realm's convention, and refused before it is sent anywhere unless
+        # CELINE_ENV=dev (REQ-0089).
+        _enforce_client_credentials_posture(client_id, client_secret)
         return asyncio.run(
             _get_token_from_client_credentials(
                 auth_url=auth_url,

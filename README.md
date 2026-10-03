@@ -31,6 +31,9 @@ overwriting an existing community requires `force`, and is refused without it.
 uv sync
 
 export DATABASE_URL="postgresql+asyncpg://postgres:securepassword123@host.docker.internal:15432/celine_rec_registry"
+# Development defaults (this password, the local Keycloak, AUTH_ENABLED/POLICIES_ENABLED=false)
+# are accepted only with CELINE_ENV=dev; unset is hardened and refuses them at startup.
+# `task run` sets CELINE_ENV=dev for you. See docs/development.md.
 
 uv run alembic upgrade head
 # or: task db:migrate
