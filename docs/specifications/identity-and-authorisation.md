@@ -273,6 +273,27 @@ secret that is empty or equal to its client id — the local realm's convention,
 `celine-cli`/`celine-cli` is the CLI's own — is refused with a non-zero exit unless the
 signal says `dev`, read as for REQ-0088. A `--token` and the password flow are not checked.
 
+### REQ-0090 — no group and no realm role decides an `/admin` request
+
+The policy question is answered on the caller's scopes alone. The subject the middleware
+puts into the policy input carries **no group**, whatever the token holds: a realm group
+(`groups: ["/admins", "admins"]`, the platform's retired mechanism), an organisation's own
+groups (`organization.<alias>.groups`) and a group named like a grant
+(`rec-registry.admin`) all reach the decision as nothing. `access.rego` reads
+`input.subject.scopes` only, and no rule reads a role, so the realm role `platform-admin`
+grants nothing here either: a platform administrator or an organisation's `admins` member
+holding no `rec-registry.*` scope is refused every `/admin` action, and a token's scope
+reaches exactly what it reached before.
+
+The platform has two levels of grant, and neither is read here: `platform-admin`, a realm
+role, is the only platform-wide one; an organisation's groups are valid only inside that
+organisation, and no `/admin` action names an organisation. The middleware used to merge
+the realm's groups with every organisation's into one list (`celine-sdk`'s
+`extract_groups`, removed in 2.0.0); a policy reading that list would have let one
+community's group act as a platform group or as the same group in another community.
+Pinned by requests through the middleware with the policy engine on, for hand-built claims
+in every shape and for real tokens from the local realm.
+
 ---
 
 ## What is not verified here
@@ -288,6 +309,6 @@ signal says `dev`, read as for REQ-0088. A `--token` and the password flow are n
   `rec-registry.members.profile.write` (REQ-0063) or a field scope (REQ-0081) any community's
   members. Keeping a manager
   to their own community is the calling dashboard's policy, and nothing here checks it.
-- **The Keycloak realm.** Operators are authorised by organization and group against state
-  `../celine-policies` owns and syncs. There is no import to grep for and nothing here
-  would notice a rename.
+- **The Keycloak realm.** Every grant is a client scope that `../celine-policies` declares
+  and syncs; no group and no realm role takes part (REQ-0090). There is no import to grep
+  for and nothing here would notice a renamed scope.

@@ -50,6 +50,8 @@ markers = [
     # the suite stays runnable anywhere — but these are the tests that prove the
     # write API and the bundle importer agree, which mocks cannot.
     "integration: requires a live database",
+    # Needs the local Keycloak (real tokens). Skipped when none answers.
+    "keycloak: requires the local Keycloak realm",
 ]
 
 [tool.semantic_release]

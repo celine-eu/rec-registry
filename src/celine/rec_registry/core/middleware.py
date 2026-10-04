@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs
 
 from celine.sdk.auth import JwtUser
-from celine.sdk.auth.jwt import extract_groups
 from celine.sdk.policies import (
     Action,
     CachedPolicyEngine,
@@ -370,14 +369,17 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         elif not isinstance(scopes, list):
             scopes = []
 
-        groups = extract_groups(user.claims)
-
-        # Build policy input
+        # Build policy input. Scopes alone decide here (REQ-0090), so the
+        # subject carries no group: a realm group grants nothing on this
+        # platform, and an organisation's groups count only inside that
+        # organisation, which no `/admin` action names. Flattening the two
+        # levels into one list is what let one community's group act as
+        # another's elsewhere.
         policy_input = PolicyInput(
             subject=Subject(
                 id=user.get_username(),
                 type=SubjectType.USER,
-                groups=groups,
+                groups=[],
                 scopes=scopes,
                 claims=user.claims,
             ),

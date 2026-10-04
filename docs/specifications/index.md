@@ -102,7 +102,7 @@ reports planned requirements as unverified.
 
 | | |
 |---|---|
-| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082, REQ-0088 – REQ-0089 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
+| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082, REQ-0088 – REQ-0090 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
 | REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069, REQ-0085 | [the registry model](registry-model.md) — what a community, member and asset are |
 | REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079, REQ-0083 – REQ-0084 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
@@ -114,7 +114,7 @@ Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they
 belong to rather than renumbering three ranges to keep them tidy. Later additions append the
 same way; REQ-0063 – REQ-0075, written planned, did, and so did REQ-0076 – REQ-0080,
-REQ-0081 – REQ-0087 and REQ-0088 – REQ-0089.
+REQ-0081 – REQ-0087, REQ-0088 – REQ-0089 and REQ-0090.
 
 ## What is not covered
 
@@ -140,8 +140,9 @@ part that belongs to it.
   `downgrade`, which drops the three tables and has never been run; and what a migration
   does to a database that already holds rows — the check builds an empty schema, so
   locking, backfill and anything a revision does to existing data are unexercised.
-- **The Keycloak realm.** Operator authorisation depends on organizations and groups that
-  `../celine-policies` syncs, and nothing here would notice a rename.
+- **The Keycloak realm.** Operator authorisation depends on the client scopes that
+  `../celine-policies` declares and syncs, and nothing here would notice a rename. No group
+  and no realm role takes part (REQ-0090).
 - **Read pagination.** `limit`, `cursor` and the filters on the community, member, asset
   and delivery-point listings are used incidentally by other tests and asserted by none.
   `MAX_PAGE_SIZE` is not exercised at all.
