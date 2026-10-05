@@ -102,13 +102,13 @@ reports planned requirements as unverified.
 
 | | |
 |---|---|
-| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082, REQ-0088 – REQ-0090 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
+| REQ-0001 – REQ-0010, REQ-0063 – REQ-0065, REQ-0081 – REQ-0082, REQ-0088 – REQ-0091 | [identity and authorisation](identity-and-authorisation.md) — who the caller is and what they may do |
 | REQ-0011 – REQ-0019, REQ-0059, REQ-0066 – REQ-0069, REQ-0085 | [the registry model](registry-model.md) — what a community, member and asset are |
 | REQ-0020 – REQ-0031, REQ-0060, REQ-0062, REQ-0070 – REQ-0073, REQ-0079, REQ-0083 – REQ-0084 | [member and community writes](member-writes.md) — how a community changes at runtime |
 | REQ-0032 – REQ-0037, REQ-0074 – REQ-0075 | [import and export](import-and-export.md) — the destructive path, and its guard |
 | REQ-0038 – REQ-0045, REQ-0061 | [cross-community lookup](lookup.md) — which community is this in |
 | REQ-0046 – REQ-0053 | [self-service](self-service.md) — what a participant may see about themselves |
-| REQ-0054 – REQ-0058, REQ-0076 – REQ-0078, REQ-0080, REQ-0086 – REQ-0087 | [operability](operability.md) — the CLI, health, version, the access log |
+| REQ-0054 – REQ-0058, REQ-0076 – REQ-0078, REQ-0080, REQ-0086 – REQ-0087, REQ-0092 | [operability](operability.md) — the CLI, health, version, the access log |
 
 Each page's own block was full and contiguous when the dataspace DID arrived, so
 REQ-0059 – REQ-0061 append to the end of the universe and are listed against the page they

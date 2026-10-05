@@ -2,6 +2,8 @@
 CELINE REC Registry API - Main application.
 """
 
+from celine.sdk.audit import configure_audit
+from celine.sdk.posture import docs_urls
 from fastapi import FastAPI
 
 from celine.rec_registry.core.access_log import install_access_log_redaction
@@ -17,6 +19,9 @@ from celine.rec_registry.api.admin.communities import router as communities_rout
 from celine.rec_registry.api.admin.lookup import router as lookup_router
 from celine.rec_registry.api.admin.writes import router as writes_router
 from celine.rec_registry.api.admin.management import router as management_router
+
+# The service name every `celine.audit` record of this process carries (REQ-0091).
+configure_audit("rec-registry")
 
 
 def create_app():
@@ -39,6 +44,10 @@ def create_app():
             f"(bundle schema v{CURRENT_SCHEMA_VERSION})"
         ),
         version=api_version(),
+        # /docs, /redoc and /openapi.json only under CELINE_ENV=dev, or with
+        # CELINE_PUBLIC_DOCS=true (REQ-0092). `app.openapi()` is unaffected,
+        # which is what `../celine-sdk` and the schema tests read.
+        **docs_urls(),
     )
 
     # Authentication and in-process authorization. Configured by (see

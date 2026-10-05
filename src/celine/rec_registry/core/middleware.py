@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs
 
+from celine.sdk.audit import audit_denied
 from celine.sdk.auth import JwtUser
 from celine.sdk.policies import (
     Action,
@@ -35,6 +36,12 @@ from celine.rec_registry.core.settings import settings
 logger = logging.getLogger(__name__)
 
 REQUEST_USER_KEY = "user"
+
+# Every refusal is recorded on `celine.audit` under an action of this service
+# (REQ-0091): `rec-registry.<derived admin action>` for /admin, this one for the
+# self-service paths.
+AUDIT_PREFIX = "rec-registry."
+SELF_SERVICE_ACTION = "rec-registry.user"
 
 # Methods that only read. Everything else mutates and is authorized separately.
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -62,6 +69,18 @@ def _wants_purge(query: str) -> bool:
     delete: the safe reading of an ambiguous request is the recoverable one.
     """
     return parse_qs(query).get("purge", ["false"])[-1].strip().lower() in _TRUTHY
+
+
+def _community_key(path: str) -> str | None:
+    """The community an ``/admin/communities/{key}…`` request names, else None.
+
+    The audit resource is the community key, a platform id. The rest of the
+    path can hold member, sensor and delivery-point ids and is never recorded.
+    """
+    segments = [s for s in path.split("/") if s]
+    if len(segments) >= 3 and segments[:2] == ["admin", "communities"]:
+        return segments[2]
+    return None
 
 
 @dataclass(frozen=True)
@@ -138,6 +157,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         if path.startswith("/me") or path.startswith("/user"):
             user = await self._extract_user(request)
             if user is None:
+                self._audit_unauthenticated(request, SELF_SERVICE_ACTION)
                 return JSONResponse(
                     {"detail": "Authentication required"},
                     status_code=401,
@@ -147,8 +167,10 @@ class PolicyMiddleware(BaseHTTPMiddleware):
 
         # /admin* paths - require valid JWT + policies check
         if path.startswith("/admin"):
+            action = self._get_admin_action(path, request.method, request.url.query)
             user = await self._extract_user(request)
             if user is None:
+                self._audit_unauthenticated(request, AUDIT_PREFIX + action)
                 return JSONResponse(
                     {"detail": "Authentication required"},
                     status_code=401,
@@ -160,12 +182,19 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 decision = await self._check_policies(
                     request=request,
                     user=user,
-                    action=self._get_admin_action(
-                        path, request.method, request.url.query
-                    ),
+                    action=action,
                     resource_id=self._get_resource_id(path),
                 )
                 if not decision.allowed:
+                    # Returned, not raised, and before routing: recorded here,
+                    # with the method and no route (REQ-0091).
+                    audit_denied(
+                        AUDIT_PREFIX + action,
+                        caller=user,
+                        resource=_community_key(path),
+                        reason=decision.reason or "denied",
+                        request=request,
+                    )
                     return JSONResponse(
                         {"detail": decision.reason or "Access denied"},
                         status_code=403,
@@ -180,6 +209,17 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 request.state.user = user
 
         return await call_next(request)
+
+    @staticmethod
+    def _audit_unauthenticated(request: Request, action: str) -> None:
+        """Record a ``401`` for a token that was presented and did not verify.
+
+        A request carrying no token names no caller and is not recorded. The
+        claims of a token that failed verification are not trusted, so the
+        record names no caller either (REQ-0091).
+        """
+        if request.headers.get(settings.auth_header_name):
+            audit_denied(action, reason="token_rejected", request=request)
 
     def _is_public_path(self, path: str) -> bool:
         """Check if path is public (no auth required)."""
@@ -338,7 +378,9 @@ class PolicyMiddleware(BaseHTTPMiddleware):
         try:
             return JwtUser.from_token(auth_header, oidc=settings.oidc)
         except ValueError as e:
-            logger.warning(f"Invalid JWT token: {e}")
+            # On a path that requires a token the refusal is recorded on
+            # `celine.audit` by the caller of this method (REQ-0091).
+            logger.debug(f"Invalid JWT token: {e}")
             return None
         except Exception as e:
             logger.error(f"JWT extraction error: {e}")

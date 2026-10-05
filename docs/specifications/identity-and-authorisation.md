@@ -294,6 +294,24 @@ community's group act as a platform group or as the same group in another commun
 Pinned by requests through the middleware with the policy engine on, for hand-built claims
 in every shape and for real tokens from the local realm.
 
+### REQ-0091 — every refusal is recorded with the caller it refused
+
+Each refused request leaves exactly one record on the `celine.audit` logger
+(`celine.sdk.audit.audit_denied`, `WARNING`, one JSON line, `event: "denied"`):
+
+| refusal | `action` | caller | `resource` | `reason` |
+|---|---|---|---|---|
+| `/admin` policy decision (`403`) | `rec-registry.<derived action>` (REQ-0001) | `sub`, client id | the community key on `/admin/communities/{key}…`, else `null` | the bundle's reason |
+| a presented token that does not verify, on `/admin`, `/user` or `/me` (`401`) | the same, or `rec-registry.user` | `null` | as above | `token_rejected` |
+| `/user` for a caller who is no member (`403 not_a_member`, REQ-0047) | `rec-registry.user.read` | `sub`, client id | `null` | `not_a_member` |
+
+The caller is named by `sub` and client id only, never email or name, and the claims of
+a token that failed verification are not read. A request with no token at all is not
+recorded: there is no caller. The resource is the community key and nothing else: the rest
+of an `/admin` path can carry member, sensor and delivery-point ids (REQ-0080). The two
+middleware refusals happen before routing, so their records carry the method and no
+route.
+
 ---
 
 ## What is not verified here

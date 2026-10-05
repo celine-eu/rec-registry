@@ -35,7 +35,8 @@ attaches meters needs `assets.write`, one that corrects a member's area needs
 has any business importing, exporting or purging. A member field is granted alone; identity
 (`user_id`, `did`, status, creating a member) is `members.write` only.
 
-Interactive OpenAPI docs are available at `http://localhost:8004/docs`.
+Interactive OpenAPI docs are available at `http://localhost:8004/docs` under `CELINE_ENV=dev`,
+or with `CELINE_PUBLIC_DOCS=true` (REQ-0092).
 
 ## Refusal codes
 

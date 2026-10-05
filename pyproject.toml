@@ -18,6 +18,9 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.0",
   "httpx>=0.28.1",
+  # TODO(audit): main.py, core/middleware.py and api/user.py import celine.sdk.audit
+  # and celine.sdk.posture.docs_urls, not in a released celine-sdk yet. Raise this
+  # floor to the first release that ships them.
   "celine-sdk>=1.13.0",
 ]
 

@@ -50,6 +50,13 @@ That independence is the requirement, and it is also the limitation — **this e
 becoming green says nothing about the service being able to serve a request.** There is no
 readiness check that does.
 
+### REQ-0092 — the API documentation is served only in development, or on purpose
+
+`/docs`, `/redoc` and `/openapi.json` are mounted under `CELINE_ENV=dev`, or when
+`CELINE_PUBLIC_DOCS=true` (`celine.sdk.posture.docs_urls`). Anywhere else they answer
+`404`. `/health` and `/version` are unaffected, and so is `app.openapi()`, which is what
+`../celine-sdk`'s client snapshot and the schema tests read.
+
 ### REQ-0058 — `/version` answers what is deployed
 
 `GET /version` answers `api_version` and `schema_version`, and both are derived:
