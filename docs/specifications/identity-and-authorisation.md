@@ -304,6 +304,7 @@ Each refused request leaves exactly one record on the `celine.audit` logger
 | `/admin` policy decision (`403`) | `rec-registry.<derived action>` (REQ-0001) | `sub`, client id | the community key on `/admin/communities/{key}…`, else `null` | the bundle's reason |
 | a presented token that does not verify, on `/admin`, `/user` or `/me` (`401`) | the same, or `rec-registry.user` | `null` | as above | `token_rejected` |
 | `/user` for a caller who is no member (`403 not_a_member`, REQ-0047) | `rec-registry.user.read` | `sub`, client id | `null` | `not_a_member` |
+| `/user` for a caller active in more than one community (`409 ambiguous_member`, REQ-0095) | `rec-registry.user.read` | `sub`, client id | `null` | `ambiguous_member` |
 
 The caller is named by `sub` and client id only, never email or name, and the claims of
 a token that failed verification are not read. A request with no token at all is not

@@ -64,6 +64,7 @@ from celine.rec_registry.services.delivery_points import (
     DeliveryPointHeld,
     ensure_delivery_points_free,
     member_delivery_point_ids,
+    member_meter_pod_ids,
     normalise_delivery_point_id,
 )
 from celine.rec_registry.services.sensors import (
@@ -664,16 +665,19 @@ async def create_member(
             ),
         )
 
-    # The same for its delivery points (REQ-0085), after the sensor locks:
-    # sensors before delivery points is the order every write takes them in.
-    if member_in.status == ACTIVE and member_in.delivery_points:
+    # The same for its delivery points (REQ-0085) and its meters' `pod`
+    # (REQ-0093), after the sensor locks: sensors before delivery points is the
+    # order every write takes them in. A meter naming one of the member's own
+    # points is among the same ids, so it is no clash.
+    if member_in.status == ACTIVE:
         await ensure_delivery_points_free(
             session,
             community_id=community.id,
             member_id=None,
-            point_ids=(
-                normalise_delivery_point_id(p.id) for p in member_in.delivery_points
-            ),
+            point_ids=[
+                *(normalise_delivery_point_id(p.id) for p in member_in.delivery_points or []),
+                *_meter_pods_in(member_in.assets),
+            ],
         )
 
     member = Member(
@@ -713,11 +717,26 @@ async def create_member(
     return member, warnings
 
 
+def _meter_pods_in(assets: AssetCollectionIn | None) -> list[str]:
+    """The normalised ``pod`` of each meter in a bundle-shaped asset collection."""
+    if not assets:
+        return []
+    return [
+        p
+        for p in (
+            normalise_delivery_point_id(getattr(m, "pod", None))
+            for m in (assets.meter or {}).values()
+        )
+        if p
+    ]
+
+
 async def ensure_reactivation_allowed(
     session: AsyncSession, community: Community, member: Member, new_status: str | None
 ) -> None:
     """Refuse a move to ``active`` while another active member holds one of
-    this member's sensors (REQ-0069) or delivery points (REQ-0085).
+    this member's sensors (REQ-0069), delivery points (REQ-0085) or its
+    meters' ``pod`` (REQ-0093).
 
     Only an active member holds a sensor, so a member that was not active held
     nothing, and another member may have been given its meter meanwhile.
@@ -743,12 +762,15 @@ async def ensure_reactivation_allowed(
         sensor_ids=await member_sensor_ids(session, member.id),
     )
     # Read after the row lock, which refreshed the member: a delivery-point
-    # write committed meanwhile is among them.
+    # write or a meter attach committed meanwhile is among them.
     await ensure_delivery_points_free(
         session,
         community_id=community.id,
         member_id=member.id,
-        point_ids=member_delivery_point_ids(member.delivery_points),
+        point_ids=[
+            *member_delivery_point_ids(member.delivery_points),
+            *await member_meter_pod_ids(session, member.id),
+        ],
     )
 
 
@@ -847,7 +869,16 @@ async def upsert_asset(
     # waits for this commit and then finds this sensor among the member's
     # (`ensure_reactivation_allowed`). Without the lock each could miss the
     # other's uncommitted half and leave two active holders.
-    if sensor_id is not None:
+    # A meter's `pod` (REQ-0093): one of the member's own delivery points, or
+    # a POD no other active member holds — checked like a delivery point, under
+    # the same lock and after the sensor's, and only for an active member (a
+    # reactivation checks the rest).
+    pod = (
+        normalise_delivery_point_id(getattr(payload, "pod", None))
+        if asset_type == "meter"
+        else None
+    )
+    if sensor_id is not None or pod is not None:
         await lock_member(session, member)
     if sensor_id is not None and member.status == ACTIVE:
         await ensure_sensors_free(
@@ -855,6 +886,17 @@ async def upsert_asset(
             community_id=community.id,
             member_id=member.id,
             sensor_ids=[sensor_id],
+        )
+    if (
+        pod is not None
+        and member.status == ACTIVE
+        and pod not in member_delivery_point_ids(member.delivery_points)
+    ):
+        await ensure_delivery_points_free(
+            session,
+            community_id=community.id,
+            member_id=member.id,
+            point_ids=[pod],
         )
 
     existing = await session.scalar(

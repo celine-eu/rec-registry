@@ -57,7 +57,7 @@ codes `ErrorCode`.
 | `asset_not_found` | `404` | deleting an asset the member does not hold |
 | `member_key_taken` | `409` | the member key is taken in the community |
 | `user_id_taken` | `409` | the `user_id` is taken in the community |
-| `did_taken` | `409` | the DID is held by another member anywhere |
+| `did_taken` | `409` | the DID is held by another active member anywhere (REQ-0096) |
 | `asset_key_taken` | `409` | the asset key is held by another member of the community |
 | `asset_key_too_long` | `422` | the asset key is longer than 128 characters (asset `PUT`, member create, import) |
 | `sensor_held` | `409` (`422` on an import) | another active member, in any community, holds the sensor |
@@ -70,8 +70,9 @@ codes `ErrorCode`.
 | `area_not_found` | `404` | renaming an area the community does not have |
 | `area_key_taken` | `409` | renaming an area onto a key the community already has |
 | `invalid_area_key` | `422` | an area key that is not letters, digits, `-` and `_`, starting with a letter or digit, at most 128 characters (area `PUT`, rename's `new_key`, import) |
-| `not_a_member` | `403` | a `/user` route other than `GET /user`, for a caller whose username names no member |
-| `delivery_point_held` | `409` (`422` on an import) | another active member, in any community, holds the delivery point (trimmed, case-insensitive) |
+| `not_a_member` | `403` | a `/user` route other than `GET /user`, for a caller whose username names no active member |
+| `ambiguous_member` | `409` | a `/user` route, for a caller active in more than one community whose token's organizations do not narrow it to one; a lookup that more than one active member would answer (REQ-0097 – REQ-0099) |
+| `delivery_point_held` | `409` (`422` on an import) | another active member, in any community, holds the delivery point (trimmed, case-insensitive) — as a point, or as a meter's `pod` (REQ-0093) |
 | `delivery_point_linked` | `409` | deleting a delivery point one of the member's meters still names as its `pod` |
 
 Other refusals — FastAPI's validation errors, a body id or key that does not match
@@ -109,10 +110,13 @@ of the service that logs the URL logs the identifiers.
 
 Self-service endpoints scoped to the authenticated user's membership. Prefix: `/user`.
 
-A caller whose username names no member gets `GET /user` with `membership: null`;
-every other route answers `403` with
+Only an **active** member answers (REQ-0094): a `pending`, `suspended` or `inactive` row
+counts as no row. A caller whose username names no active member gets `GET /user` with
+`membership: null`; every other route answers `403` with
 `{"detail": "You are not a member of any community", "code": "not_a_member"}`
-(REQ-0047). Branch on the code, not the sentence.
+(REQ-0047). Branch on the code, not the sentence. A caller active in more than one
+community is answered from the one their token's `organization` aliases name; when those
+do not name exactly one, every route answers `409 ambiguous_member` (REQ-0095).
 
 ### `GET /user`
 
@@ -260,6 +264,12 @@ Convenience endpoint listing meter-type assets with POD and meter type info.
 
 Cross-community lookups. Prefix: `/admin/lookup`.
 
+Every lookup below except `members-by-dids` answers from **active** members only
+(REQ-0097 – REQ-0099): a released (`inactive`), `pending` or `suspended` member is not
+found, the same as an unknown id, and contributes no rows to a batch. Where more than one
+active member would answer a single lookup, it is `409 ambiguous_member`, naming nobody,
+rather than whichever row came first.
+
 ### `GET /admin/lookup/community-by-user-id/{user_id}`
 
 Find which community a user belongs to.
@@ -290,7 +300,8 @@ Batch lookup: resolve multiple sensor IDs to assets in a single request.
 
 Batch lookup: resolve the assets owned by a set of members, across communities.
 Every row carries `owner_user_id`, so the caller can attribute it back to the
-member it asked about.
+member it asked about. A user id that is an active member of more than one
+community refuses the whole batch with `409 ambiguous_member` (REQ-0097).
 
 **Request body:** `{user_ids: [...]}`, at most 500.
 
@@ -386,10 +397,11 @@ fields are kept in `extra` too.
 
 **Responses:** `201` with the member; `409` when the key or `user_id` is already
 taken (`member_key_taken`, `user_id_taken`), naming the existing key so the caller
-can switch to `PATCH`, or when the `did` is already held by another member
-anywhere in the registry (`did_taken`); `409 sensor_held` when an `active` member
+can switch to `PATCH`, or when an `active` member is created with a `did` another
+active member holds anywhere in the registry (`did_taken`, REQ-0096); `409 sensor_held` when an `active` member
 is created with a meter whose sensor another active member holds, and `409
-delivery_point_held` with a delivery point another active member holds; `404
+delivery_point_held` with a delivery point, or a meter `pod`, another active member
+holds; `404
 community_not_found`; `422 invalid_role`, `invalid_status` or `unknown_area` when
 `role`, `status` or `area` is out of set (the area must be a key of the
 community's `areas`).
@@ -408,7 +420,7 @@ already holds is a `200` that changes nothing, so the write is safe to retry.
 
 **Responses:** `200`; `409 user_id_taken` if the new `user_id` belongs to another
 member of the community, or `409 did_taken` if the new `did` belongs to any other
-member in the registry. A DID clash inside the addressed community names the
+active member in the registry and this member is active after the patch (REQ-0096). A DID clash inside the addressed community names the
 holding member; one in another community does not, because which member of which
 other community holds a DID is not the caller's question. `status: active` on a
 member that was not active re-checks its sensors and delivery points: `409
@@ -462,14 +474,16 @@ Move a member through `pending → active → suspended → inactive`, with an o
 
 A move to `active` re-checks the member's sensors and delivery points — only an
 active member holds one — and answers `409 sensor_held` / `409 delivery_point_held`,
-leaving the status unchanged, when another active member took one meanwhile. An
-unknown status is `422 invalid_status`.
+leaving the status unchanged, when another active member took one meanwhile; and
+`409 did_taken`, naming nobody, when another active member holds its `did`
+(REQ-0096). An unknown status is `422 invalid_status`.
 
 ### `DELETE /admin/communities/{community_key}/members/{member_key}`
 
 **Deactivates** the member (`status = inactive`). A member who leaves still has
 metering history, past consents and provenance elsewhere that reference them, and
-assets cascade on a real delete.
+assets cascade on a real delete. The row keeps its `user_id` and `did`; it no longer
+answers `/user` (REQ-0094) and no longer blocks its DID (REQ-0096).
 
 `?purge=true` erases the member and its assets permanently. It requires the
 separate `rec-registry.members.purge` grant, so a service that manages members
@@ -528,6 +542,7 @@ so an EV charger cannot be stored carrying a heat pump's fields.
 | attached | `200` with the stored asset (`AssetDetail`) |
 | already attached to this member | `200`, nothing changes |
 | another active member, in any community, holds the sensor | `409 sensor_held` — the holder is named by key only inside this community |
+| the meter's `pod` is not one of the member's delivery points, and another active member, in any community, holds it as a delivery point or through a meter | `409 delivery_point_held` — named as for the sensor (REQ-0093) |
 | another member of this community holds the key (with the convention: an inactive member still holding the asset) | `409 asset_key_taken` |
 | the sensor id is blank after trimming | `422` |
 | the asset key is longer than 128 characters | `422 asset_key_too_long` |

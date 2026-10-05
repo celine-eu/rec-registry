@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, ForeignKey, UniqueConstraint, Index, Text, DateTime
+from sqlalchemy import String, ForeignKey, UniqueConstraint, Index, Text, DateTime, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -159,8 +159,9 @@ class Member(Base):
     #            resolves its member with `JwtUser.get_username()`, so a row
     #            written with a `sub` in this field exports cleanly and locks
     #            its owner out. Unique per community.
-    #   did      who they are in the dataspace. Globally unique, and absent
-    #            until the identity is minted — see the column below.
+    #   did      who they are in the dataspace. Unique among active members
+    #            registry-wide, and absent until the identity is minted — see
+    #            the column below.
 
     key: Mapped[str] = mapped_column(String(128), nullable=False)
 
@@ -172,19 +173,24 @@ class Member(Base):
     # `IN` over a set of DIDs on every consent-gated export, and burying an
     # identifier in JSONB makes it look like a declaration.
     #
-    # **Nullable, and globally unique.** The DID arrives after the member does —
-    # ../onboarding registers at `rec_registry_member` and mints the identity at
-    # `dataspace_identity`, one step later — and a deployment with no dataspace
-    # never populates it at all. A unique index permits many NULLs, which is
-    # exactly the wanted semantics: at most one member per DID, any number of
-    # members without one.
+    # **Nullable, and unique among active members.** The DID arrives after the
+    # member does — ../onboarding registers at `rec_registry_member` and mints
+    # the identity at `dataspace_identity`, one step later — and a deployment
+    # with no dataspace never populates it at all. A unique index permits many
+    # NULLs, which is exactly the wanted semantics: at most one active member
+    # per DID, any number of members without one.
     #
     # Global rather than per-community, unlike `key` and `user_id`. A person
-    # cannot be a member of two RECs — the same supply point settled twice is
-    # double billing — so there is no second community for the same DID to
-    # appear in. That is a domain assumption, not a derived fact; if multi-REC
-    # membership ever arrives, this constraint is what has to be revisited
-    # first.
+    # cannot be an active member of two RECs — the same supply point settled
+    # twice is double billing — so there is no second community for the same
+    # DID to be live in. That is a domain assumption, not a derived fact; if
+    # multi-REC membership ever arrives, this constraint is what has to be
+    # revisited first.
+    #
+    # **Active only (REQ-0096).** A released member keeps its row, `did` and
+    # all, as history; a global index made that row block the same DID from
+    # ever being live again, in any community. Release leaves the DID on the
+    # row: the partial index is what frees it, so nothing has to be erased.
     did: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     name: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -227,11 +233,17 @@ class Member(Base):
     __table_args__ = (
         UniqueConstraint("community_id", "key", name="uq_member_community_key"),
         UniqueConstraint("community_id", "user_id", name="uq_member_community_user_id"),
-        # Global, not per-community: see the column comment. Nullable, so this
-        # permits any number of members holding no DID while refusing a second
-        # holder of one — which is what makes a DID a safe join key for an
-        # export authorised by consent.
-        Index("ix_member_did", "did", unique=True),
+        # Global, not per-community, and over active members only: see the
+        # column comment. Nullable, so this permits any number of members
+        # holding no DID while refusing a second *active* holder of one — which
+        # is what makes a DID a safe join key for an export authorised by
+        # consent, given that export reads active members only.
+        Index(
+            "ix_member_did",
+            "did",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
         Index("ix_member_community_id", "community_id"),
         Index("ix_member_user_id", "user_id"),
         Index("ix_member_role", "role"),

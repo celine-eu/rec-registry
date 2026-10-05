@@ -114,7 +114,8 @@ A bundle is refused, and nothing is deleted or inserted, when:
   (REQ-0028), implemented with the sensor clause;
 - two of its active members hold the same delivery point, or one of them holds a point an
   active member of **another** community holds — `delivery_point_held` (REQ-0085), as the
-  sensor clause, reported by member key and never by the point's id;
+  sensor clause, reported by member key and never by the point's id; an active member's
+  meter `pod` that is not one of its own points holds that id the same way (REQ-0093);
 - a member's `role` or `status` is outside its set, or its `area` is not one of the bundle's
   areas (REQ-0066);
 - an area's key is not an area key — `invalid_area_key` (REQ-0067), one refusal per key;

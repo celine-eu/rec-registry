@@ -13,10 +13,12 @@ Provides cross-community lookups:
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from celine.rec_registry.core.errors import ErrorCode, RegistryError, error_responses
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
+from celine.rec_registry.services.sensors import ACTIVE
 from celine.rec_registry.schemas.models import (
     CommunityRef,
     MemberRef,
@@ -36,6 +38,31 @@ from celine.rec_registry.schemas.models import (
 router = APIRouter()
 
 
+# Every lookup below that starts from a person or a device answers from the
+# **active** member only (REQ-0097 – REQ-0099). Release leaves the row
+# `inactive`, with its `user_id`, its meters and its delivery points; answering
+# from it attributed a POD's new occupant to the person who left, and handed a
+# released member's old meter to anything joining on the answer. More than one
+# active match is refused, never picked: the first row of an unordered query is
+# whichever the planner returned.
+
+
+def _ambiguous() -> RegistryError:
+    """``409 ambiguous_member``, naming nobody (REQ-0098, REQ-0099)."""
+    return RegistryError(
+        409,
+        "More than one active member answers this lookup",
+        ErrorCode.AMBIGUOUS_MEMBER,
+    )
+
+
+def _the_one(rows):
+    """The single row, ``None`` for none, ``409`` for more than one."""
+    if len(rows) > 1:
+        raise _ambiguous()
+    return rows[0] if rows else None
+
+
 # =============================================================================
 # Global Lookups
 # =============================================================================
@@ -44,18 +71,19 @@ router = APIRouter()
     "/lookup/community-by-user-id/{user_id:path}",
     operation_id="lookup_community_by_user_id",
     response_model=LookupByUserIdResponse,
+    responses=error_responses(409),
 )
 async def lookup_community_by_user_id(
     user_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find which community a user belongs to."""
+    """Find which community a user is an active member of (REQ-0098)."""
     result = await session.execute(
         select(Member, Community)
         .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user_id)
+        .where(Member.user_id == user_id, Member.status == ACTIVE)
     )
-    row = result.first()
+    row = _the_one(result.all())
 
     if row is None:
         raise HTTPException(status_code=404, detail="User not found in any community")
@@ -82,19 +110,20 @@ async def lookup_community_by_user_id(
     "/lookup/community-by-sensor-id/{sensor_id:path}",
     operation_id="lookup_community_by_sensor_id",
     response_model=LookupBySensorIdResponse,
+    responses=error_responses(409),
 )
 async def lookup_community_by_sensor_id(
     sensor_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find which community a meter belongs to."""
+    """Find which community a meter belongs to, through its active owner (REQ-0099)."""
     result = await session.execute(
         select(Asset, Member, Community)
         .join(Member, Asset.owner_id == Member.id)
         .join(Community, Asset.community_id == Community.id)
-        .where(Asset.sensor_id == sensor_id)
+        .where(Asset.sensor_id == sensor_id, Member.status == ACTIVE)
     )
-    row = result.first()
+    row = _the_one(result.all())
 
     if row is None:
         raise HTTPException(status_code=404, detail="Sensor not found in any community")
@@ -128,36 +157,46 @@ async def lookup_community_by_sensor_id(
     "/lookup/community-by-delivery-point/{dp_id:path}",
     operation_id="lookup_community_by_delivery_point",
     response_model=LookupByDeliveryPointResponse,
+    responses=error_responses(409),
 )
 async def lookup_community_by_delivery_point(
     dp_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find which community a delivery point belongs to."""
+    """Find which community a delivery point belongs to, through its active
+    holder (REQ-0099)."""
     result = await session.execute(
-        select(Member, Community).join(Community, Member.community_id == Community.id)
+        select(Member, Community)
+        .join(Community, Member.community_id == Community.id)
+        .where(Member.status == ACTIVE)
     )
 
-    for m, c in result.all():
-        for dp in m.delivery_points or []:
-            if dp.get("id") == dp_id:
-                return LookupByDeliveryPointResponse(
-                    community=CommunityRef(
-                        id=str(c.id),
-                        key=c.key,
-                        name=c.name,
-                    ),
-                    member=MemberRef(
-                        key=m.key,
-                        user_id=m.user_id,
-                        name=m.name,
-                        role=m.role,
-                    ),
-                    delivery_point=DeliveryPoint(**dp),
-                )
+    matches = [
+        (m, c, dp)
+        for m, c in result.all()
+        for dp in m.delivery_points or []
+        if dp.get("id") == dp_id
+    ]
+    match = _the_one(matches)
+    if match is None:
+        raise HTTPException(
+            status_code=404, detail="Delivery point not found in any community"
+        )
 
-    raise HTTPException(
-        status_code=404, detail="Delivery point not found in any community"
+    m, c, dp = match
+    return LookupByDeliveryPointResponse(
+        community=CommunityRef(
+            id=str(c.id),
+            key=c.key,
+            name=c.name,
+        ),
+        member=MemberRef(
+            key=m.key,
+            user_id=m.user_id,
+            name=m.name,
+            role=m.role,
+        ),
+        delivery_point=DeliveryPoint(**dp),
     )
 
 
@@ -165,18 +204,19 @@ async def lookup_community_by_delivery_point(
     "/lookup/member-by-user-id/{user_id:path}",
     operation_id="lookup_member_by_user_id",
     response_model=GlobalMemberLookup,
+    responses=error_responses(409),
 )
 async def lookup_member_by_user_id(
     user_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find a member by user_id across all communities."""
+    """Find the active member with this user_id, across all communities (REQ-0098)."""
     result = await session.execute(
         select(Member, Community)
         .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user_id)
+        .where(Member.user_id == user_id, Member.status == ACTIVE)
     )
-    row = result.first()
+    row = _the_one(result.all())
 
     if row is None:
         raise HTTPException(status_code=404, detail="Member not found")
@@ -201,19 +241,20 @@ async def lookup_member_by_user_id(
     "/lookup/asset-by-sensor-id/{sensor_id:path}",
     operation_id="lookup_asset_by_sensor_id",
     response_model=GlobalAssetLookup,
+    responses=error_responses(409),
 )
 async def lookup_asset_by_sensor_id(
     sensor_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Find an asset by sensor_id across all communities."""
+    """Find the asset an active member holds under this sensor_id (REQ-0099)."""
     result = await session.execute(
         select(Asset, Member, Community)
         .join(Member, Asset.owner_id == Member.id)
         .join(Community, Asset.community_id == Community.id)
-        .where(Asset.sensor_id == sensor_id)
+        .where(Asset.sensor_id == sensor_id, Member.status == ACTIVE)
     )
-    row = result.first()
+    row = _the_one(result.all())
 
     if row is None:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -254,7 +295,8 @@ async def lookup_assets_by_sensor_ids(
 
     **A sensor id that matches nothing contributes no row** rather than failing
     the request: the caller asked about a set, and one absent member of it does
-    not make the rest unanswerable.
+    not make the rest unanswerable. Nor does one whose owner is not active
+    (REQ-0099).
     """
     if not body.sensor_ids:
         return []
@@ -263,7 +305,7 @@ async def lookup_assets_by_sensor_ids(
         select(Asset, Member, Community)
         .join(Member, Asset.owner_id == Member.id)
         .join(Community, Asset.community_id == Community.id)
-        .where(Asset.sensor_id.in_(body.sensor_ids))
+        .where(Asset.sensor_id.in_(body.sensor_ids), Member.status == ACTIVE)
     )
 
     return [
@@ -289,6 +331,7 @@ async def lookup_assets_by_sensor_ids(
     "/lookup/assets-by-user-ids",
     operation_id="lookup_assets_by_user_ids",
     response_model=list[GlobalAssetLookup],
+    responses=error_responses(409),
 )
 async def lookup_assets_by_user_ids(
     body: UserIdsBatchRequest,
@@ -310,15 +353,37 @@ async def lookup_assets_by_user_ids(
     who owns nothing are indistinguishable — both contribute no rows. The caller
     supplies the ids, so any difference in the answer would make this a way to
     discover who is registered.
+
+    **Active owners only (REQ-0097).** A released member's row keeps its
+    meters, and a consent-gated query built from it would read whoever holds
+    that POD now. A member who is not active contributes no rows, exactly as
+    an unknown id does. A user id active in more than one community is
+    ``409 ambiguous_member``, naming nobody: the route has no community to
+    scope by, and answering both would join one person's consent to two
+    communities' meters.
     """
     if not body.user_ids:
         return []
+
+    ambiguous = await session.scalar(
+        select(Member.user_id)
+        .where(Member.user_id.in_(body.user_ids), Member.status == ACTIVE)
+        .group_by(Member.user_id)
+        .having(func.count(Member.id) > 1)
+        .limit(1)
+    )
+    if ambiguous is not None:
+        raise RegistryError(
+            409,
+            "A user id in this request is an active member of more than one community",
+            ErrorCode.AMBIGUOUS_MEMBER,
+        )
 
     result = await session.execute(
         select(Asset, Member, Community)
         .join(Member, Asset.owner_id == Member.id)
         .join(Community, Asset.community_id == Community.id)
-        .where(Member.user_id.in_(body.user_ids))
+        .where(Member.user_id.in_(body.user_ids), Member.status == ACTIVE)
     )
 
     return [

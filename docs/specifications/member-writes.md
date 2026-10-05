@@ -250,8 +250,9 @@ nothing `PATCH` already does while adding one more entry to REQ-0031's registry 
 be a conflict — the member itself is excluded from the clash check, by row id rather than
 by member key, because keys repeat across communities and the check does not filter by one.
 
-**A DID another member already holds is `409`, and what the message says depends on where
-that member is:**
+**A DID another active member already holds is `409`** — only active holders count, and only
+for a member that is active after the patch (REQ-0096) — **and what the message says depends
+on where that member is:**
 
 - **Inside the community the caller addressed** — the response names the holding member's
   key, as the `user_id` clash does, so the caller can act on it.
@@ -374,7 +375,7 @@ each comes from:
 | `asset_not_found` | `404` | deleting an asset the member does not hold (REQ-0028, REQ-0071) |
 | `member_key_taken` | `409` | a member key already held in the community (REQ-0022) |
 | `user_id_taken` | `409` | a `user_id` already held in the community (REQ-0022, REQ-0024) |
-| `did_taken` | `409` | a DID held by another member anywhere (REQ-0060) |
+| `did_taken` | `409` | a DID held by another active member anywhere (REQ-0060, REQ-0096) |
 | `asset_key_taken` | `409` | an asset key held by another member of the community (REQ-0028, REQ-0071) |
 | `asset_key_too_long` | `422` | an asset key longer than the 128 characters `asset.key` holds, on every path that writes assets (REQ-0028) |
 | `sensor_held` | `409` | a sensor id held by another active member anywhere (REQ-0069) |
@@ -387,8 +388,9 @@ each comes from:
 | `area_not_found` | `404` | renaming an area the community does not have (REQ-0079) |
 | `area_key_taken` | `409` | renaming an area onto a key the community already has (REQ-0079) |
 | `invalid_area_key` | `422` | an area key that is not letters, digits, `-` and `_`, starting with a letter or digit, at most 128 characters — on the area `PUT`, the rename's `new_key` and the import (REQ-0067, REQ-0079) |
-| `not_a_member` | `403` | a self-service read by a caller whose username names no member (REQ-0047) |
-| `delivery_point_held` | `409` | a delivery point held by another active member anywhere, on the delivery-point `PUT`, a create, a move to `active` and the import (REQ-0085) |
+| `not_a_member` | `403` | a self-service read by a caller whose username names no active member (REQ-0047, REQ-0094) |
+| `ambiguous_member` | `409` | a self-service read by a caller active in more than one community, whose token does not narrow it to one (REQ-0095); a cross-community lookup more than one active member would answer (REQ-0097 – REQ-0099) |
+| `delivery_point_held` | `409` | a delivery point held by another active member anywhere, on the delivery-point `PUT`, a create, a move to `active` and the import (REQ-0085); a meter's `pod` held so, on the asset `PUT` and the same paths (REQ-0093) |
 | `delivery_point_linked` | `409` | deleting a delivery point one of the member's meters still names as its `pod` (REQ-0084) |
 
 `sensor_held` and `delivery_point_held` are `422` on an import, where the bundle is what is

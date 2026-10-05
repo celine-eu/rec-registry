@@ -27,6 +27,14 @@ the same way:
   REQ-0060): a holder inside it may be named by member key, a holder
   elsewhere is not named, and neither is its community.
 
+**A meter's ``pod`` is a holding too** (REQ-0093). A meter names the supply
+it reads in ``properties.pod``; it may name one of its owner's own delivery
+points, or a POD no other active member holds — through its delivery points or
+through a meter of its own. So the holders this module compares are every
+active member listing the id as a delivery point *or* owning a meter whose
+``pod`` is the id, and the same ``delivery_point_held`` refusal guards a meter
+attach as it guards a delivery point.
+
 Nothing here logs a delivery-point id.
 """
 
@@ -56,6 +64,7 @@ __all__ = [
     "ensure_delivery_points_free",
     "lock_delivery_points",
     "member_delivery_point_ids",
+    "member_meter_pod_ids",
     "normalise_delivery_point_id",
 ]
 
@@ -96,6 +105,22 @@ def member_delivery_point_ids(points: Sequence[dict[str, Any]] | None) -> list[s
     )
 
 
+async def member_meter_pod_ids(
+    session: AsyncSession, member_id: uuid.UUID
+) -> list[str]:
+    """The normalised ``pod`` of each of this member's meters, sorted, distinct."""
+    rows = (
+        await session.execute(
+            text(
+                "select properties ->> 'pod' as pod from asset "
+                "where owner_id = cast(:member_id as uuid) and asset_type = 'meter'"
+            ),
+            {"member_id": str(member_id)},
+        )
+    ).all()
+    return sorted({p for p in (normalise_delivery_point_id(r.pod) for r in rows) if p})
+
+
 async def lock_delivery_points(session: AsyncSession, point_ids: Iterable[str]) -> None:
     """Take the transaction-scoped advisory lock of each normalised id, sorted.
 
@@ -108,20 +133,31 @@ async def lock_delivery_points(session: AsyncSession, point_ids: Iterable[str]) 
         )
 
 
-# Every active member's delivery points, one row each, compared on the
-# normalised id. `jsonb_typeof` guards a row whose column is not a list, which
-# no write produces but a hand-edited row could hold.
+# Every active member's holdings, one row per member and id, compared on the
+# normalised id: its delivery points (REQ-0085) and its meters' `pod`
+# (REQ-0093). `jsonb_typeof` guards a row whose column is not a list, which no
+# write produces but a hand-edited row could hold.
 _HOLDERS_SQL = text(
     """
-    select lower(btrim(dp.value ->> 'id', cast(:ws as text))) as point_id,
-           m.community_id, m.id as member_id, m.key as member_key
-      from member m
+    select distinct h.point_id, m.community_id, m.id as member_id,
+           m.key as member_key
+      from (
+            select dm.id as member_id,
+                   lower(btrim(dp.value ->> 'id', cast(:ws as text))) as point_id
+              from member dm
+             cross join lateral jsonb_array_elements(
+                   case when jsonb_typeof(dm.delivery_points) = 'array'
+                        then dm.delivery_points else '[]'::jsonb end) as dp(value)
+            union all
+            select a.owner_id as member_id,
+                   lower(btrim(a.properties ->> 'pod', cast(:ws as text))) as point_id
+              from asset a
+             where a.asset_type = 'meter'
+           ) as h
+      join member m on m.id = h.member_id
       join community c on c.id = m.community_id
-     cross join lateral jsonb_array_elements(
-           case when jsonb_typeof(m.delivery_points) = 'array'
-                then m.delivery_points else '[]'::jsonb end) as dp(value)
      where m.status = :active
-       and lower(btrim(dp.value ->> 'id', cast(:ws as text))) in :wanted
+       and h.point_id in :wanted
        and (cast(:exclude_member_id as uuid) is null
             or m.id <> cast(:exclude_member_id as uuid))
        and (cast(:exclude_community_key as text) is null
@@ -137,7 +173,8 @@ async def active_delivery_point_holders(
     exclude_member_id: uuid.UUID | None = None,
     exclude_community_key: str | None = None,
 ) -> list[DeliveryPointHolding]:
-    """Every active member holding one of these normalised ids, anywhere."""
+    """Every active member holding one of these normalised ids, anywhere —
+    as a delivery point or as a meter's ``pod``."""
     wanted = sorted(set(point_ids))
     if not wanted:
         return []

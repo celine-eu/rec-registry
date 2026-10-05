@@ -172,16 +172,19 @@ class TestTheComparedForm:
 class TestAPodCorrection:
     async def _setup(self, client) -> None:
         """ex-00001 holds OLD and a second POD; two meters name OLD (one with
-        another spelling), one names the second; ex-00002 has a meter naming
-        OLD too, which is not ex-00001's to relink."""
+        another spelling), one names the second; ex-00002 holds a third POD;
+        ex-00003 has a meter naming OLD too, which is not ex-00001's to relink.
+        ex-00003 is suspended: an active member could not name a POD another
+        active member holds (REQ-0093)."""
         await _community(client)
         await _add(client, "ex-00001", 1, pods=[OLD, "IT001E00000003"])
         await _add(client, "ex-00002", 2, pods=["IT001E00000004"])
+        await _add(client, "ex-00003", 3, status="suspended")
         await _meter(client, "ex-00001", "SEN-1", OLD)
         await _meter(client, "ex-00001", "SEN-2", f" {OLD.lower()} ")
         await _meter(client, "ex-00001", "SEN-3", "IT001E00000003")
         await _meter(client, "ex-00001", "SEN-4", None)
-        await _meter(client, "ex-00002", "SEN-5", OLD)
+        await _meter(client, "ex-00003", "SEN-5", OLD)
 
     async def test_adds_removes_and_relinks_in_one_write(self, live_client):
         """@verifies REQ-0084"""
@@ -202,7 +205,7 @@ class TestAPodCorrection:
             "meter-SEN-4": None,
         }
         # Another member's meter is not this member's to relink.
-        assert await _pods(live_client, "ex-00002") == {"meter-SEN-5": OLD}
+        assert await _pods(live_client, "ex-00003") == {"meter-SEN-5": OLD}
 
     async def test_the_old_id_is_matched_trimmed_and_case_insensitively(
         self, live_client

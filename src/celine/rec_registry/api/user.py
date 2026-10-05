@@ -22,6 +22,7 @@ from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community, Member, Asset
 from celine.rec_registry.core.errors import ErrorCode, RegistryError, error_responses
 from celine.rec_registry.core.middleware import require_user
+from celine.rec_registry.services.sensors import ACTIVE
 from celine.rec_registry.schemas.models import (
     # User-specific models (no sensitive data leakage)
     UserProfile,
@@ -62,23 +63,74 @@ def _not_a_member(user: JwtUser, request: Request) -> RegistryError:
     )
 
 
+def _ambiguous_member(user: JwtUser, request: Request) -> RegistryError:
+    """``409 ambiguous_member``: more than one active member answers (REQ-0095)."""
+    audit_denied(
+        "rec-registry.user.read",
+        caller=user,
+        reason=ErrorCode.AMBIGUOUS_MEMBER.value,
+        request=request,
+    )
+    return RegistryError(
+        409,
+        "You are an active member of more than one community, and this request "
+        "does not say which one",
+        ErrorCode.AMBIGUOUS_MEMBER,
+    )
+
+
+async def _resolve_member(
+    session: AsyncSession, user: JwtUser, request: Request
+) -> tuple[Member, Community] | None:
+    """The caller's own member row, and its community — or ``None``.
+
+    **Only an active member answers (REQ-0094).** A released (`inactive`),
+    `suspended` or `pending` row is the same as no row: it holds no sensor and
+    no delivery point (REQ-0069, REQ-0085), and dataset-api builds its live
+    row filter from what these routes return. Answering from an inactive row
+    kept a released member reading their old meters — and, once the POD was
+    given to somebody else, the new occupant's.
+
+    **More than one active row is narrowed by the token, never picked
+    (REQ-0095).** `user_id` is unique per community only, so one username can
+    be active in two. The token's `organization` aliases are community keys;
+    exactly one active row inside them is the answer. Anything else — none of
+    them in the token, or still two — is ``409 ambiguous_member``: the first
+    row of an unordered query is whichever the planner returned.
+    """
+    rows = (
+        await session.execute(
+            select(Member, Community)
+            .join(Community, Member.community_id == Community.id)
+            .where(Member.user_id == user.get_username(), Member.status == ACTIVE)
+        )
+    ).all()
+    if len(rows) == 0:
+        return None
+    if len(rows) == 1:
+        return tuple(rows[0])
+
+    aliases = {org.alias for org in user.organizations}
+    in_token = [row for row in rows if row[1].key in aliases]
+    if len(in_token) == 1:
+        return tuple(in_token[0])
+    raise _ambiguous_member(user, request)
+
+
 @router.get(
     "",
+    responses=error_responses(409),
     response_model=UserMeResponse,
 )
 async def get_me(
+    request: Request,
     user: JwtUser = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
     Get current user's profile and membership summary.
     """
-    result = await session.execute(
-        select(Member, Community)
-        .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user.get_username())
-    )
-    row = result.first()
+    row = await _resolve_member(session, user, request)
 
     profile = UserProfile(
         sub=user.sub,
@@ -127,7 +179,7 @@ async def get_me(
 
 @router.get(
     "/member",
-    responses=error_responses(403),
+    responses=error_responses(403, 409),
     response_model=UserMemberDetail,
 )
 async def get_my_member(
@@ -148,12 +200,11 @@ async def get_my_member(
     written in. Withholding it means a participant cannot see, in the one place
     that is theirs, which dataspace identity is acting for them.
     """
-    member = await session.scalar(
-        select(Member).where(Member.user_id == user.get_username())
-    )
+    row = await _resolve_member(session, user, request)
 
-    if member is None:
+    if row is None:
         raise _not_a_member(user, request)
+    member, _ = row
 
     return UserMemberDetail(
         key=member.key,
@@ -171,7 +222,7 @@ async def get_my_member(
 
 @router.get(
     "/community",
-    responses=error_responses(403),
+    responses=error_responses(403, 409),
     response_model=UserCommunityDetail,
 )
 async def get_my_community(
@@ -184,12 +235,7 @@ async def get_my_community(
 
     Includes user's own area and role for context.
     """
-    result = await session.execute(
-        select(Member, Community)
-        .join(Community, Member.community_id == Community.id)
-        .where(Member.user_id == user.get_username())
-    )
-    row = result.first()
+    row = await _resolve_member(session, user, request)
 
     if row is None:
         raise _not_a_member(user, request)
@@ -213,7 +259,7 @@ async def get_my_community(
 
 @router.get(
     "/assets",
-    responses=error_responses(403),
+    responses=error_responses(403, 409),
     response_model=UserAssetsResponse,
 )
 async def get_my_assets(
@@ -227,12 +273,11 @@ async def get_my_assets(
 
     Note: Does not include owner info (user already knows it's theirs).
     """
-    member = await session.scalar(
-        select(Member).where(Member.user_id == user.get_username())
-    )
+    row = await _resolve_member(session, user, request)
 
-    if member is None:
+    if row is None:
         raise _not_a_member(user, request)
+    member, _ = row
 
     query = select(Asset).where(Asset.owner_id == member.id)
     if asset_type:
@@ -258,7 +303,7 @@ async def get_my_assets(
 
 @router.get(
     "/assets/{asset_key}",
-    responses=error_responses(403),
+    responses=error_responses(403, 409),
     response_model=UserAssetDetail,
 )
 async def get_my_asset(
@@ -270,12 +315,11 @@ async def get_my_asset(
     """
     Get a specific asset owned by the current user.
     """
-    member = await session.scalar(
-        select(Member).where(Member.user_id == user.get_username())
-    )
+    row = await _resolve_member(session, user, request)
 
-    if member is None:
+    if row is None:
         raise _not_a_member(user, request)
+    member, _ = row
 
     asset = await session.scalar(
         select(Asset).where(Asset.owner_id == member.id, Asset.key == asset_key)
@@ -302,7 +346,7 @@ async def get_my_asset(
 
 @router.get(
     "/delivery-points",
-    responses=error_responses(403),
+    responses=error_responses(403, 409),
     response_model=UserDeliveryPointsResponse,
 )
 async def get_my_delivery_points(
@@ -313,12 +357,11 @@ async def get_my_delivery_points(
     """
     Get current user's delivery points.
     """
-    member = await session.scalar(
-        select(Member).where(Member.user_id == user.get_username())
-    )
+    row = await _resolve_member(session, user, request)
 
-    if member is None:
+    if row is None:
         raise _not_a_member(user, request)
+    member, _ = row
 
     items = [DeliveryPoint(**dp) for dp in (member.delivery_points or [])]
 

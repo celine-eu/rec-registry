@@ -189,13 +189,23 @@ def _active_meters(bundle: RegistryBundleIn) -> list[tuple[str, str, str]]:
 
 def _active_delivery_points(bundle: RegistryBundleIn) -> list[tuple[str, str]]:
     """``(normalised delivery-point id, member key)`` of every active member's
-    delivery points in the bundle, one per member and id (REQ-0085)."""
+    delivery points in the bundle, and of its meters' ``pod`` (REQ-0093), one
+    per member and id (REQ-0085). A meter naming its member's own point adds
+    nothing: it is the same pair."""
     found: set[tuple[str, str]] = set()
     for member_key, member in bundle.members.items():
         if member.status != ACTIVE:
             continue
-        for point in member.delivery_points or []:
-            point_id = normalise_delivery_point_id(point.id)
+        ids = [point.id for point in member.delivery_points or []]
+        if member.assets:
+            # A meter the import skips (no sensor id, REQ-0035) holds nothing.
+            ids.extend(
+                meter.pod
+                for meter in (member.assets.meter or {}).values()
+                if normalise_sensor_id(meter.sensor_id) is not None
+            )
+        for raw in ids:
+            point_id = normalise_delivery_point_id(raw)
             if point_id is not None:
                 found.add((point_id, member_key))
     return sorted(found)
@@ -279,7 +289,8 @@ async def import_refusals(
     not refused for that, the area is.
 
     One delivery point held twice (``delivery_point_held``, REQ-0085), by
-    the same rule as the sensors, checked after them.
+    the same rule as the sensors, checked after them — a meter's ``pod``
+    holding its id as a delivery point does (REQ-0093).
 
     Also an asset key longer than the column holds (``asset_key_too_long``,
     REQ-0028), named by its member key and length — the key itself can embed a

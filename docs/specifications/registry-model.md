@@ -171,7 +171,8 @@ existed still parses, and exports omit the field entirely rather than writing `d
 
 **Unique registry-wide, not per community**, unlike `key` and `user_id`. `ix_member_did` is
 a unique index on `did` alone, and because Postgres treats NULLs as distinct it permits any
-number of members holding none while refusing a second holder of one.
+number of members holding none while refusing a second holder of one. Since REQ-0096 it
+covers active members only.
 
 The global scope rests on a domain assumption, stated here as one: a person cannot be a
 member of two RECs, because the same supply point settled twice is double billing. If
@@ -185,6 +186,32 @@ way — the property REQ-0037 pins.
 It is published as **schema v0.6**, which adds this field and changes nothing else — so a
 v0.5 file is a valid v0.6 one. Like every schema under `schemas/community/`, that document
 is documentation and is not enforced (REQ-0018).
+
+### REQ-0096 — a DID is unique among active members only, and a released row keeps its DID
+
+`ix_member_did` is a unique index on `did` **where `status = 'active'`** (migration
+`0003_member_did_active_only`). At most one active member holds a DID, registry-wide; any
+number of `pending`, `suspended` or `inactive` rows may hold it too, beside that one or
+without it.
+
+Release leaves the member's row `inactive` with its `user_id` and `did` intact, as history.
+Under the global index of REQ-0059 that row blocked the DID from ever being held by an active
+member again, in any community. The partial index frees it without erasing anything, so
+**release does not clear `did`**.
+
+Every write that can make an active holder is held to it, with REQ-0060's `409 did_taken`:
+
+- creating an active member holding the DID (the index refuses it);
+- `PATCH` writing a `did` onto a member that is active after the patch — the clash check
+  reads active members only, and names the holder only inside the addressed community;
+  a member left non-active by the patch is not checked;
+- a move to `active`, through the status route or `PATCH`, of a member whose DID another
+  active member holds — the index refuses it at commit, the status is left as it was, and
+  the answer names nobody.
+
+The bundle import is held by the same index; a clash there is not translated (as before).
+Nothing that reads by DID changes: `members-by-dids` (REQ-0061) may now return an inactive row
+beside the active one, each carrying its `status` and `community_key`.
 
 ### REQ-0066 — role and status are closed sets on every write path, and a member's area is one of its community's
 
@@ -387,3 +414,35 @@ community, until it is resolved. `celine-rec-registry duplicate-delivery-points`
 A mistyped POD that happens to be somebody else's is the case this catches: two holders would
 attribute one supply to two people in every consumer that joins supply to members. Decided
 in [ADR-0012](../decisions/ADR-0012-a-delivery-point-has-one-active-holder-and-is-corrected-in-one-write.md).
+
+A meter's `pod` holds its id as a delivery point does (REQ-0093): the holders compared here
+are every active member listing the id as a delivery point **or** owning a meter whose `pod`
+is the id.
+
+### REQ-0093 — a meter's `pod` is one of its owner's delivery points, or held by nobody else
+
+A meter names the supply it reads in `properties.pod`. That id, compared as REQ-0085 compares
+(trimmed, lower-cased), is either one of the owner's own delivery points — every point it
+lists, the point's own `active` flag not read — or an id no **other** active member holds,
+in any community, as a delivery point or through a meter of its own. A meter naming an id
+outside its owner's points makes its owner that id's holder from then on: another member's
+meter or delivery point on it is refused, and the holder may still declare it as a point.
+A meter with no `pod`, or one blank after trimming, is not checked; only an `active` member
+holds, so a meter of a member that is not active is checked when the member is reactivated.
+
+Checked on every path that can make an active member's meter name a POD: the asset `PUT`
+(REQ-0071); creating a member with meters (REQ-0020); a status change to `active` (REQ-0024,
+REQ-0025); and the bundle import (REQ-0074), where a meter the import skips for want of a
+sensor id holds nothing. Every REQ-0085 check counts meter holdings too, so a delivery-point
+`PUT` naming an id another active member's meter holds is refused as well. A clash is
+`409 delivery_point_held` (`422` on the import), in the same body, under the same advisory
+lock, after the same row and sensor locks, and naming nobody outside the community — exactly
+as REQ-0085. Existing meters are not repaired: an existing clash blocks the next write that
+re-checks it, not unrelated ones.
+
+**Not covered:** `duplicate-delivery-points` (REQ-0086) and
+`GET …/delivery-points/duplicates` (REQ-0087) list delivery points only, not meter holdings.
+
+The meter is the second way a member is joined to a supply, and without the rule it was the
+way round REQ-0085: a meter naming somebody else's POD attributes that supply to its owner in
+every consumer that reads `pod`.

@@ -49,6 +49,7 @@ class ErrorCode(StrEnum):
     AREA_KEY_TAKEN = "area_key_taken"
     INVALID_AREA_KEY = "invalid_area_key"
     NOT_A_MEMBER = "not_a_member"
+    AMBIGUOUS_MEMBER = "ambiguous_member"
     DELIVERY_POINT_HELD = "delivery_point_held"
     DELIVERY_POINT_LINKED = "delivery_point_linked"
 

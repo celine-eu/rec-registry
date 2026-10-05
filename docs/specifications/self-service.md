@@ -26,7 +26,8 @@ The counts are of the caller's own assets.
 
 ### REQ-0047 — a caller who is a member of nothing is answered, not refused
 
-`GET /user` answers `200` with `membership: null`. The other five routes answer `403` with the
+`GET /user` answers `200` with `membership: null` — and so for a caller whose only rows are
+not `active` (REQ-0094). The other five routes answer `403` with the
 coded body `{"detail": "You are not a member of any community", "code": "not_a_member"}`
 (REQ-0073), so a client — `../dataset-api`'s self-service row filter, which reads that answer as
 "no rows" and every other registry failure as an error — tells it apart by `code` rather than by
@@ -102,6 +103,29 @@ perfectly good member — is told they belong to nothing.
 This is the failure worth stating loudest, because it is silently wrong rather than loud:
 the operator reading that `403` investigates the registry, and the fault is in the token.
 
+### REQ-0094 — only an active member answers; any other row is no member
+
+Every route here resolves the caller's member among rows with `user_id` equal to their
+username **and `status = 'active'`**. A `pending`, `suspended` or `inactive` row is treated
+exactly as no row: `GET /user` answers `membership: null` and the other five answer
+`403 not_a_member` (REQ-0047) — the same bodies a stranger gets, so nothing tells a
+released member from somebody who never joined.
+
+`active` is the status that holds sensors and delivery points (REQ-0069, REQ-0085), so it is
+the status a self-service answer may be read from. `../dataset-api` builds its live
+`sensor_id IN (…)` row filter from `GET /user/assets`; answering from an inactive row kept a
+released member reading their old meters — and, once their POD was given to somebody else,
+the new occupant's readings.
+
+### REQ-0095 — two active rows are narrowed by the token's communities, never picked
+
+`user_id` is unique per community only, so one username can be active in two communities.
+When it is, the route keeps the active rows whose community key is one of the token's
+`organization` aliases. Exactly one left is the answer; none or more than one is
+`409` with `{"code": "ambiguous_member"}` (REQ-0073), on all six routes, recorded on
+`celine.audit` like `not_a_member` (REQ-0091). The routes take no community parameter, so the
+token is the only thing that can say which.
+
 ---
 
 ## What is not verified here
@@ -111,7 +135,6 @@ the operator reading that `403` investigates the registry, and the fault is in t
   exercised. Nothing here proves a caller with no token is refused — that is the
   middleware's job, and the middleware is not covered either
   ([identity and authorisation](identity-and-authorisation.md)).
-- **Cross-community membership.** Every route resolves the member with a query on
-  `user_id` alone, taking the first match, with no community filter. The data model allows
-  one person to be a member of two communities; what these routes would answer if they
-  were is not specified and not tested.
+- **Cross-community membership, past resolution.** REQ-0094 and REQ-0095 fix which row
+  answers. What the other services that key on the person rather than the community show
+  after a move between communities is theirs, not this registry's.

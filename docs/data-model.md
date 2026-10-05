@@ -27,7 +27,7 @@ A participant belonging to a community.
 |---|---|---|
 | `key` | `str` | Unique member identifier within the community |
 | `user_id` | `str` | Keycloak **username** the participant authenticates with — not a subject UUID |
-| `did` | `str?` | Dataspace decentralised identifier. Optional, unique across the whole registry |
+| `did` | `str?` | Dataspace decentralised identifier. Optional, unique among active members across the whole registry (REQ-0096) |
 | `name` | `str` | Display name |
 | `role` | `str` | `consumer`, `prosumer`, `producer`, `operator`, or `admin` — enforced on every write path |
 | `area` | `str` | A key of the community's `areas` — enforced on every write path; rewritten by an area rename (REQ-0079) |

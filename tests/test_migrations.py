@@ -133,3 +133,41 @@ class TestTheMigrationsMatchTheModels:
         )
 
         assert {"community", "member", "asset"} <= present
+
+
+@pytest.mark.integration
+class TestTheDidIndexCoversActiveMembersOnly:
+    def _did_index(self, conn) -> str:
+        return conn.scalar(
+            text(
+                "select indexdef from pg_indexes where schemaname = :schema "
+                "and indexname = 'ix_member_did'"
+            ),
+            {"schema": SCHEMA},
+        )
+
+    def test_the_index_is_partial_and_goes_down_and_up_again(
+        self, migrated_connection
+    ):
+        """`compare_metadata` does not compare an index's `WHERE`, so the
+        partial predicate is read from the catalogue; and `0003` is walked down
+        to `0002` (global again) and back up.
+
+        @verifies REQ-0096
+        """
+        conn = migrated_connection
+        assert "WHERE" in self._did_index(conn)
+        assert "'active'" in self._did_index(conn)
+
+        config = Config(str(REPO_ROOT / "alembic.ini"))
+        config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        config.attributes["connection"] = conn
+
+        command.downgrade(config, "0002_member_did")
+        conn.commit()
+        assert "WHERE" not in self._did_index(conn)
+        assert "UNIQUE" in self._did_index(conn)
+
+        command.upgrade(config, "head")
+        conn.commit()
+        assert "WHERE" in self._did_index(conn)

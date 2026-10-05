@@ -14,6 +14,10 @@ none of it is an **enumeration oracle** (REQ-0045). Both properties are easy to 
 making the endpoint more useful, and one of them already was — `assets-by-sensor-ids`
 carried no bound at all until the two were made to read the same constant.
 
+A third holds every lookup that starts from a person or a device: **only an active member
+answers** (REQ-0097 – REQ-0099). "Not found" below means "no active member", and the member
+row of each answer is an active one.
+
 ---
 
 ### REQ-0038 — a user id resolves to its community and the member row within it
@@ -148,3 +152,43 @@ list of DIDs answers an empty list without querying.
 **It derives `assets.lookup`, not `lookup`** (REQ-0005). Resolving what a named person
 holds is a different disclosure from resolving which community a sensor sits in, and this
 route does the first.
+
+### REQ-0097 — the member batch answers active owners only, and refuses a person active twice
+
+`POST /admin/lookup/assets-by-user-ids` returns only assets whose owner's `status` is
+`active`. A member who is not active contributes no rows — indistinguishable, as REQ-0045
+requires, from an unknown id and from a member who owns nothing.
+
+A released member's row keeps its meters. `../dataset-api` builds its consent-gated
+`sensor_id IN (…)` filter from this answer, so answering from that row handed a consenting
+person their old meter — whose POD, once reassigned, measures somebody else.
+
+A user id that is an active member of more than one community answers `409` with
+`{"code": "ambiguous_member"}` for the whole request; the detail names nobody. The route takes
+no community to scope by, and answering both would join one consent to two communities'
+meters. This does tell the caller that one of the ids it supplied is active twice, which no
+other answer here reveals; the caller holds `rec-registry.lookup` and supplied the ids.
+
+### REQ-0098 — a user id resolves to its single active member, or to nothing
+
+`GET /admin/lookup/member-by-user-id/{user_id}` and
+`GET /admin/lookup/community-by-user-id/{user_id}` resolve among the user id's **active**
+rows. None is `404`, so a user id whose only rows are released is not found; one is the
+answer; more than one is `409 ambiguous_member`. Neither route returns an inactive row, and
+neither takes a parameter to: no caller needs one — `../onboarding` releases a member by
+community and key, and writes a DID only onto an active row.
+
+### REQ-0099 — a sensor id or delivery point resolves to its active holder, never to whoever left
+
+`GET /admin/lookup/community-by-sensor-id/{sensor_id}`,
+`GET /admin/lookup/asset-by-sensor-id/{sensor_id}` and
+`GET /admin/lookup/community-by-delivery-point/{dp_id}` resolve among assets and delivery
+points of **active** members. None is `404`; more than one is `409 ambiguous_member`.
+`POST /admin/lookup/assets-by-sensor-ids` returns rows of active owners only.
+
+Only an active member holds a sensor or a delivery point (REQ-0069, REQ-0085), and release
+leaves the meter and the POD on the released row. Once they are given to somebody else, two
+rows carry the same id, and the first row of an unordered query attributed the new
+occupant's readings to the person who left — the digital twin nudges every owner the batch
+returns. Two active holders cannot be written through any path here, but an existing clash
+is not repaired (REQ-0069), so the lookup refuses rather than picks.

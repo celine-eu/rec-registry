@@ -182,8 +182,9 @@ async def create_member(
 
     An `active` member created with meters is `409 sensor_held` when another
     active member, in any community, holds one of their sensors (REQ-0069),
-    and one created with delivery points is `409 delivery_point_held` when
-    another active member holds one of those (REQ-0085).
+    and one created with delivery points, or with meters naming a `pod`, is
+    `409 delivery_point_held` when another active member holds one of those
+    (REQ-0085, REQ-0093).
     An asset key longer than 128 characters is `422 asset_key_too_long`
     (REQ-0028).
 
@@ -246,7 +247,9 @@ async def patch_member(
     both matter:
 
     * **It is registry-wide.** `ix_member_did` is global, so the check cannot be
-      scoped to the community in the path.
+      scoped to the community in the path. It covers active members only
+      (REQ-0096), so only an active holder clashes, and only with a member
+      that is active after the patch.
     * **It names the holder only inside the addressed community.** Saying which
       member of *another* community holds a DID would answer a question the
       caller did not ask about people they were not addressing — the same
@@ -257,9 +260,9 @@ async def patch_member(
     be a conflict.
 
     Setting `status: active` on a member that was not active re-checks its
-    sensors and delivery points, and the whole patch is refused
+    sensors, delivery points and meters' `pod`, and the whole patch is refused
     `409 sensor_held` / `409 delivery_point_held` when another active member
-    holds one (REQ-0069, REQ-0085).
+    holds one (REQ-0069, REQ-0085, REQ-0093).
 
     `role` and `area` are still accepted here, for `members.write` holders,
     and held to the same sets as on `PATCH …/profile`: `422 invalid_role`,
@@ -287,7 +290,15 @@ async def patch_member(
                 ErrorCode.USER_ID_TAKEN,
             )
 
-    if "did" in patch and patch["did"]:
+    # Only an active holder clashes, and only when this member ends the patch
+    # active: `ix_member_did` covers active members alone (REQ-0096). A
+    # reactivation that brings a held DID back is refused by the index at
+    # commit, below.
+    if (
+        "did" in patch
+        and patch["did"]
+        and (patch.get("status") or member.status) == member_service.ACTIVE
+    ):
         # `Member.id`, not `Member.key`: keys repeat across communities and this
         # query does not filter by one, so excluding by key would also exclude a
         # same-keyed member of a different community — the very holder that has
@@ -295,6 +306,7 @@ async def patch_member(
         clash = await session.scalar(
             select(Member).where(
                 Member.did == patch["did"],
+                Member.status == member_service.ACTIVE,
                 Member.id != member.id,
             )
         )
@@ -483,10 +495,10 @@ async def change_member_status(
     reasons about — and because it reads clearly in an audit log, which a
     generic field update does not.
 
-    A move to `active` re-checks the member's sensors and delivery points:
-    when another active member took one meanwhile it answers
+    A move to `active` re-checks the member's sensors, delivery points and
+    meters' `pod`: when another active member took one meanwhile it answers
     `409 sensor_held` / `409 delivery_point_held` and the status is left as
-    it was (REQ-0069, REQ-0085).
+    it was (REQ-0069, REQ-0085, REQ-0093).
     """
     community, member = await _resolve(session, community_key, member_key)
 
@@ -505,7 +517,17 @@ async def change_member_status(
     if payload.reason:
         member.extra = {**(member.extra or {}), "status_reason": payload.reason}
 
-    await session.commit()
+    did = member.did  # read before the rollback below expires the row
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # A move to `active` while another active member holds this member's
+        # DID: `ix_member_did` covers active members only (REQ-0096).
+        await session.rollback()
+        conflict = member_service.member_conflict_from(exc, did=did)
+        if conflict is None:
+            raise
+        raise RegistryError(409, str(conflict), conflict.code) from exc
     await session.refresh(member)
     return _member_detail(member)
 
@@ -707,6 +729,10 @@ async def upsert_asset(
     * `200` — attached, or already attached to this member (a no-op replace);
     * `409 sensor_held` — another active member, in any community, holds the
       sensor (REQ-0069); a holder outside this community is not named;
+    * `409 delivery_point_held` — the meter's `pod` is not one of the member's
+      own delivery points, and another active member, in any community, holds
+      it as a delivery point or through a meter of its own (REQ-0093); named
+      as REQ-0085 names a holder;
     * `409 asset_key_taken` — another member of this community holds the key
       (with the convention: an inactive member still holding the asset).
 
@@ -756,6 +782,8 @@ async def upsert_asset(
         raise RegistryError(409, str(exc), ErrorCode.ASSET_KEY_TAKEN) from exc
     except member_service.SensorHeld as exc:
         raise _sensor_held(exc) from exc
+    except member_service.DeliveryPointHeld as exc:
+        raise _delivery_point_held(exc) from exc
     except member_service.AssetKeyTooLong as exc:
         raise _asset_key_too_long(exc) from exc
 
