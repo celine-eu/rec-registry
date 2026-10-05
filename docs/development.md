@@ -50,8 +50,7 @@ same entry point: it starts only with real values. The CLI applies the same rule
 client credentials: a `--client-secret` equal to `--client-id` (the local
 `celine-cli`/`celine-cli`) is refused unless `CELINE_ENV=dev` (REQ-0089).
 
-The check lives in `celine.sdk.posture`, which needs the celine-sdk release after
-1.24.0; until it is published the SDK must be installed from source.
+The check lives in `celine.sdk.posture`, first released in celine-sdk 2.0.0.
 
 ## Local Setup
 

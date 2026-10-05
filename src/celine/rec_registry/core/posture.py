@@ -18,8 +18,6 @@ any user, any service account — gets every admin read, write and purge.
 
 from __future__ import annotations
 
-# `celine.sdk.posture` lands in the celine-sdk release after 1.24.0.
-# TODO: raise the `celine-sdk` floor in pyproject.toml once that release is out.
 from celine.sdk.posture import PostureGuard
 
 from celine.rec_registry.core.settings import Settings

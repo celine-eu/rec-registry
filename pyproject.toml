@@ -18,11 +18,9 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.0",
   "httpx>=0.28.1",
-  # TODO(audit): main.py, core/middleware.py and api/user.py import celine.sdk.audit
-  # and celine.sdk.posture.docs_urls, not in a released celine-sdk yet. Raise this
-  # floor to the first release that ships them.
-  # TODO(audit-route): core/middleware.py passes route= to audit_denied, first
-  # accepted in celine-sdk after cbc741b (unreleased). Raise the floor on release.
+  # 2.0.0 is the first release with celine.sdk.audit and celine.sdk.posture.docs_urls
+  # (main.py, core/middleware.py, api/user.py) and audit_denied(route=)
+  # (core/middleware.py).
   "celine-sdk>=2.0.0",
 ]
 
