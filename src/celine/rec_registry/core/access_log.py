@@ -1,5 +1,6 @@
 """
-Keep sensor ids, user ids and delivery-point ids out of the access log (REQ-0080).
+Keep member keys, sensor ids, user ids and delivery-point ids out of the access
+log (REQ-0080).
 
 A meter's asset key is ``meter-<sensor_id>``, and three routes take the
 sensor id itself as a path segment, so uvicorn's access line — which prints the
@@ -8,17 +9,19 @@ detach and lookup. Likewise three routes take a member's user id (their
 Keycloak username) and three a delivery-point id (a POD) in the path. The image
 runs uvicorn directly (Dockerfile ``CMD``), whose access line is logged to
 ``uvicorn.access`` with the arguments
-``(client_addr, method, path_with_query, http_version, status_code)``.
+``(client_addr, method, path_with_query, http_version, status_code)``. Every
+``/admin`` route under a member takes the member key in the path.
 
 A filter on that logger rewrites the path argument: the segment after
+``/members/`` becomes ``{member_key}``, the segment after
 ``/assets/`` becomes ``{asset_key}``, everything after ``by-sensor-id/`` becomes
 ``{sensor_id}``, everything after ``by-user-id/`` becomes ``{user_id}``, and
 everything after ``/delivery-points/by-id/`` or
 ``community-by-delivery-point/``, and the segment after a member's
-``/delivery-points/``, becomes ``{dp_id}``. The ``cursor`` of the asset, meter
-and delivery-point listings (an asset key or a delivery-point id), and any
-``sensor_id``, ``user_id`` or delivery-point id query value (``replaces``
-among them), becomes
+``/delivery-points/``, becomes ``{dp_id}``. The ``cursor`` of the member, asset, meter
+and delivery-point listings (a member key, an asset key or a delivery-point id),
+and any ``owner`` (a member key), ``sensor_id``, ``user_id`` or delivery-point
+id query value (``replaces`` among them), becomes
 ``{redacted}``. Method, route shape and status are kept. The markers are fixed
 rather than a hash: these ids are few, and a hash of one is reversible by
 trying them.
@@ -31,6 +34,7 @@ import re
 
 ACCESS_LOGGER = "uvicorn.access"
 
+MEMBER_KEY_MARKER = "{member_key}"
 ASSET_KEY_MARKER = "{asset_key}"
 SENSOR_ID_MARKER = "{sensor_id}"
 USER_ID_MARKER = "{user_id}"
@@ -50,6 +54,9 @@ _PATH_TAILS = (
     (re.compile(r"(/delivery-points/by-id/)[^?#]*"), DP_ID_MARKER),
     (re.compile(r"(community-by-delivery-point/)[^?#]*"), DP_ID_MARKER),
 )
+# `/members/<key>` and everything under it on the admin member routes. One
+# segment: what follows is a fixed route segment or an id rewritten below.
+_MEMBER_KEY_IN_PATH = re.compile(r"(/members/)(?!by-user-id/)[^/?#]+")
 # `/assets/<key>` on the admin read, the member asset write and `/user/assets`,
 # and `/delivery-points/<id>` on the member delivery-point write. No route has
 # anything after the key or id, so the rest of the path is it (one with a slash
@@ -60,8 +67,9 @@ _DP_ID_IN_PATH = re.compile(r"(/delivery-points/)(?!by-id/)[^?#]+")
 # segment, not an id, so it is logged as it is. Only on the community route;
 # a member's point named `duplicates` is still an id.
 _DUPLICATES_REPORT = re.compile(r"/admin/communities/[^/]+/delivery-points/duplicates")
-# Listings whose pagination cursor is an asset key or a delivery-point id.
-_ID_CURSOR_LISTING = re.compile(r"/(assets|meters|delivery-points)/?$")
+# Listings whose pagination cursor is a member key, an asset key or a
+# delivery-point id.
+_ID_CURSOR_LISTING = re.compile(r"/(members|assets|meters|delivery-points)/?$")
 
 _ALWAYS_REDACTED_PARAMS = frozenset(
     {
@@ -75,6 +83,8 @@ _ALWAYS_REDACTED_PARAMS = frozenset(
         "delivery_point_ids",
         # `PUT …/delivery-points/{new}?replaces={old}` (REQ-0084): the old POD.
         "replaces",
+        # `…/assets?owner=` and `…/meters?owner=`: a member key.
+        "owner",
     }
 )
 
@@ -94,11 +104,12 @@ def _redact_query(path: str, query: str) -> str:
 
 
 def redact_path(path_with_query: str) -> str:
-    """The request target as it may be logged: no asset key, sensor id, user
-    id or delivery-point id."""
+    """The request target as it may be logged: no member key, asset key,
+    sensor id, user id or delivery-point id."""
     path, sep, query = path_with_query.partition("?")
     for pattern, marker in _PATH_TAILS:
         path = pattern.sub(lambda m, marker=marker: m.group(1) + marker, path)
+    path = _MEMBER_KEY_IN_PATH.sub(lambda m: m.group(1) + MEMBER_KEY_MARKER, path)
     path = _ASSET_KEY_IN_PATH.sub(lambda m: m.group(1) + ASSET_KEY_MARKER, path)
     if not _DUPLICATES_REPORT.fullmatch(path):
         path = _DP_ID_IN_PATH.sub(lambda m: m.group(1) + DP_ID_MARKER, path)

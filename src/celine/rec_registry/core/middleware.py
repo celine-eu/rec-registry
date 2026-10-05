@@ -30,6 +30,7 @@ from celine.sdk.policies import (
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.routing import Host, Match, Mount
 
 from celine.rec_registry.core.settings import settings
 
@@ -81,6 +82,33 @@ def _community_key(path: str) -> str | None:
     if len(segments) >= 3 and segments[:2] == ["admin", "communities"]:
         return segments[2]
     return None
+
+
+def route_template(request: Request) -> str | None:
+    """The template of the route this request will reach, or ``None``.
+
+    The middleware refuses before routing, so the request carries no matched route
+    yet. This resolves it the way the router will: the first route matching the
+    path and the method, else the first matching the path alone (the router answers
+    that one ``405``). It is the template
+    (``/admin/communities/{community_key}/members/{member_key}``), never the raw path,
+    which carries member, sensor and delivery-point ids. A path no route serves, or
+    one under a mount, gives ``None``: the record then carries no route (REQ-0091).
+    """
+    router = getattr(request.scope.get("app"), "router", None)
+    found = None
+    for route in getattr(router, "routes", ()):
+        template = getattr(route, "path_format", None)
+        if not template or isinstance(route, (Mount, Host)):
+            continue
+        # A regex match on the path and a method check: no handler, no dependency.
+        match, _ = route.matches(request.scope)
+        if match is Match.FULL:
+            found = template
+            break
+        if match is Match.PARTIAL and found is None:
+            found = template
+    return (request.scope.get("root_path") or "") + found if found else None
 
 
 @dataclass(frozen=True)
@@ -187,13 +215,14 @@ class PolicyMiddleware(BaseHTTPMiddleware):
                 )
                 if not decision.allowed:
                     # Returned, not raised, and before routing: recorded here,
-                    # with the method and no route (REQ-0091).
+                    # with the method and the route template (REQ-0091).
                     audit_denied(
                         AUDIT_PREFIX + action,
                         caller=user,
                         resource=_community_key(path),
                         reason=decision.reason or "denied",
                         request=request,
+                        route=route_template(request),
                     )
                     return JSONResponse(
                         {"detail": decision.reason or "Access denied"},
@@ -216,10 +245,17 @@ class PolicyMiddleware(BaseHTTPMiddleware):
 
         A request carrying no token names no caller and is not recorded. The
         claims of a token that failed verification are not trusted, so the
-        record names no caller either (REQ-0091).
+        record names no caller either (REQ-0091). The resource is the community
+        key the path names, read from the path alone as for the ``403``.
         """
         if request.headers.get(settings.auth_header_name):
-            audit_denied(action, reason="token_rejected", request=request)
+            audit_denied(
+                action,
+                resource=_community_key(request.url.path),
+                reason="token_rejected",
+                request=request,
+                route=route_template(request),
+            )
 
     def _is_public_path(self, path: str) -> bool:
         """Check if path is public (no auth required)."""

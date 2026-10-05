@@ -83,24 +83,26 @@ that answers a coded `422` documents its `422` as `oneOf` `ErrorResponse` and
 
 ## The access log
 
-A meter's asset key is `meter-<sensor_id>`, three routes take a sensor id in
-the path, three a user id and three a delivery-point id, so the access line uvicorn writes
+A meter's asset key is `meter-<sensor_id>`, every member route takes the member key in the
+path, three routes a sensor id, three a user id and three a delivery-point id, so the access line uvicorn writes
 is rewritten before it is logged (REQ-0080): method, route shape and status stay, the
 identifiers do not.
 
 | Request | Logged as |
 |---|---|
-| `PUT /admin/communities/example-rec/members/ex-00001/assets/meter-SEN-1` | `PUT /admin/communities/example-rec/members/ex-00001/assets/{asset_key}` |
+| `PUT /admin/communities/example-rec/members/ex-00001/assets/meter-SEN-1` | `PUT /admin/communities/example-rec/members/{member_key}/assets/{asset_key}` |
+| `PUT /admin/communities/example-rec/members/ex-00001/name` | `PUT /admin/communities/example-rec/members/{member_key}/name` |
 | `GET /admin/lookup/asset-by-sensor-id/SEN-1` | `GET /admin/lookup/asset-by-sensor-id/{sensor_id}` |
 | `GET /admin/lookup/member-by-user-id/user-1` | `GET /admin/lookup/member-by-user-id/{user_id}` |
 | `GET /admin/lookup/community-by-delivery-point/DP-1` | `GET /admin/lookup/community-by-delivery-point/{dp_id}` |
 | `GET /admin/communities/example-rec/meters?limit=50&cursor=meter-SEN-1` | `GET /admin/communities/example-rec/meters?limit=50&cursor={redacted}` |
 
-Every asset key is replaced, on every `/assets/{asset_key}` route; so is everything after
+Every member key is replaced, on every `/members/{member_key}` route, and every asset key, on
+every `/assets/{asset_key}` route; so is everything after
 `by-sensor-id/`, `by-user-id/`, `/delivery-points/by-id/` and
 `community-by-delivery-point/`, the delivery-point id on the member delivery-point `PUT`
-and `DELETE`, the `cursor` of the asset, meter and delivery-point listings, and any
-`sensor_id(s)`, `user_id(s)`, `dp_id(s)` or `delivery_point_id(s)` query value. The markers
+and `DELETE`, the `cursor` of the member, asset, meter and delivery-point listings, and any
+`owner`, `sensor_id(s)`, `user_id(s)`, `dp_id(s)` or `delivery_point_id(s)` query value. The markers
 are fixed rather than a hash of the id. Only uvicorn's own line is covered: a proxy in front
 of the service that logs the URL logs the identifiers.
 

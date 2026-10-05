@@ -302,7 +302,7 @@ Each refused request leaves exactly one record on the `celine.audit` logger
 | refusal | `action` | caller | `resource` | `reason` |
 |---|---|---|---|---|
 | `/admin` policy decision (`403`) | `rec-registry.<derived action>` (REQ-0001) | `sub`, client id | the community key on `/admin/communities/{key}…`, else `null` | the bundle's reason |
-| a presented token that does not verify, on `/admin`, `/user` or `/me` (`401`) | the same, or `rec-registry.user` | `null` | as above | `token_rejected` |
+| a presented token that does not verify, on `/admin`, `/user` or `/me` (`401`) | the same, or `rec-registry.user` | `null` | as above, read from the path before the token | `token_rejected` |
 | `/user` for a caller who is no member (`403 not_a_member`, REQ-0047) | `rec-registry.user.read` | `sub`, client id | `null` | `not_a_member` |
 | `/user` for a caller active in more than one community (`409 ambiguous_member`, REQ-0095) | `rec-registry.user.read` | `sub`, client id | `null` | `ambiguous_member` |
 
@@ -310,8 +310,10 @@ The caller is named by `sub` and client id only, never email or name, and the cl
 a token that failed verification are not read. A request with no token at all is not
 recorded: there is no caller. The resource is the community key and nothing else: the rest
 of an `/admin` path can carry member, sensor and delivery-point ids (REQ-0080). The two
-middleware refusals happen before routing, so their records carry the method and no
-route.
+middleware refusals happen before routing; their records carry the method and the template
+of the route the router will match (`/admin/communities/{community_key}/members/{member_key}`),
+resolved from the app's routes by path and method, never the raw path. A refused path no
+route serves records `route: null`.
 
 ---
 

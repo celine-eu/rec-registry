@@ -185,12 +185,15 @@ a write to a sibling, and a re-import of their community is refused (REQ-0074). 
 report to run before a deployment relies on the rule — then an onboarding template sync, an
 area rename (REQ-0079) for a key, or a reshaped bundle, corrects what it lists.
 
-### REQ-0080 — the access log carries no sensor id, user id or delivery-point id
+### REQ-0080 — the access log carries no member key, sensor id, user id or delivery-point id
 
 The access line uvicorn writes for every request (the image's `CMD` runs uvicorn) keeps its
-method, its route shape and its status, and carries no sensor id, user id or delivery-point
-id:
+method, its route shape and its status, and carries no member key, sensor id, user id or
+delivery-point id:
 
+- the segment after `/members/` is logged as `{member_key}` — on every admin route under a
+  member (the member read and delete, its profile, name, role, area and status writes, its
+  delivery points and its assets); `…/members/by-user-id/` is the user-id route below;
 - the segment after `/assets/` is logged as `{asset_key}` — on the admin asset read, the
   member asset `PUT` and `DELETE`, and `GET /user/assets/{asset_key}` — for every asset key,
   not only `meter-` ones;
@@ -204,9 +207,9 @@ id:
 - everything after `/delivery-points/by-id/` and `/admin/lookup/community-by-delivery-point/`
   is logged as `{dp_id}`, slashes included, and so is the segment after a member's
   `/delivery-points/` on the member delivery-point `PUT` and `DELETE`;
-- the `cursor` query value of the `…/assets`, `…/meters` and `…/delivery-points` listings,
-  which is an asset key or a delivery-point id, is logged as `{redacted}`, and so is a
-  `sensor_id`, `sensor_ids`, `user_id`, `user_ids`, `dp_id`, `dp_ids`, `delivery_point_id`,
+- the `cursor` query value of the `…/members`, `…/assets`, `…/meters` and
+  `…/delivery-points` listings, which is a member key, an asset key or a delivery-point id, is
+  logged as `{redacted}`, and so is an `owner` (a member key), `sensor_id`, `sensor_ids`, `user_id`, `user_ids`, `dp_id`, `dp_ids`, `delivery_point_id`,
   `delivery_point_ids` or `replaces` query value on any route — `replaces` is the old POD of
   a delivery-point correction (REQ-0084); no route takes the others today. A community's
   `…/delivery-points/duplicates` (REQ-0087) is a route, not an id, and is logged as it is.
@@ -215,14 +218,17 @@ A meter's asset key is `meter-<sensor_id>`, so without this every attach, detach
 wrote a member's sensor id — the key that joins them to their readings — to the log, where
 it is kept longer and read by more people than the registry's rows. A user id is the
 member's login name and a delivery-point id their supply point's code; both name a person
-as surely. The markers are fixed, not a hash: these ids are few, and a hash of one is
+as surely. A member key is the community's own id for the member, joined to their name in the
+registry by anyone who can read it. The markers are fixed, not a hash: these ids are few, and a hash of one is
 reversed by trying them. The cost is that two lines about one asset, member or delivery
-point cannot be told apart in the log.
+point cannot be told apart in the log; the audit record (REQ-0091) names the community, and
+the route says what was done.
 
 The rewrite is a filter on the `uvicorn.access` logger that `create_app` installs, once. It
 covers uvicorn's line and nothing else: a process that serves the app some other way, or a
-proxy in front of it that logs the URL, is not covered. A member key, community key, area
-key or topology node id in the path is logged as it is.
+proxy in front of it that logs the URL, is not covered. A community key, area key or
+topology node id in the path is logged as it is: they name the community and its grid, not a
+person.
 
 ---
 

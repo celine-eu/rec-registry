@@ -49,7 +49,7 @@ class TestRedactPath:
         [
             (
                 f"/admin/communities/{C}/members/ex-00001/assets/{KEY}",
-                f"/admin/communities/{C}/members/ex-00001/assets/{{asset_key}}",
+                f"/admin/communities/{C}/members/{{member_key}}/assets/{{asset_key}}",
             ),
             (
                 f"/admin/communities/{C}/assets/{KEY}",
@@ -123,7 +123,7 @@ class TestRedactPath:
             # The member delivery-point `PUT` and `DELETE`.
             (
                 f"/admin/communities/{C}/members/ex-00001/delivery-points/{DP}",
-                f"/admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}}",
+                f"/admin/communities/{C}/members/{{member_key}}/delivery-points/{{dp_id}}",
             ),
         ],
     )
@@ -148,7 +148,7 @@ class TestRedactPath:
         """
         raw = f"/admin/communities/{C}/{listing}?limit=1&cursor={KEY}&owner=ex-00001"
         assert redact_path(raw) == (
-            f"/admin/communities/{C}/{listing}?limit=1&cursor={{redacted}}&owner=ex-00001"
+            f"/admin/communities/{C}/{listing}?limit=1&cursor={{redacted}}&owner={{redacted}}"
         )
 
     def test_a_delivery_point_listing_cursor_is_redacted(self):
@@ -161,13 +161,44 @@ class TestRedactPath:
             f"/admin/communities/{C}/delivery-points?type=pod&cursor={{redacted}}"
         )
 
-    def test_another_listing_keeps_its_cursor(self):
-        """A member listing's cursor is a member key, not a sensor id.
+    def test_a_member_listing_cursor_is_redacted(self):
+        """A member listing's cursor is a member key.
 
         @verifies REQ-0080
         """
-        raw = f"/admin/communities/{C}/members?cursor=ex-00001"
-        assert redact_path(raw) == raw
+        raw = f"/admin/communities/{C}/members?status=active&cursor=ex-00001"
+        assert redact_path(raw) == (
+            f"/admin/communities/{C}/members?status=active&cursor={{redacted}}"
+        )
+
+    @pytest.mark.parametrize(
+        "raw, logged",
+        [
+            (
+                f"/admin/communities/{C}/members/ex-00001",
+                f"/admin/communities/{C}/members/{{member_key}}",
+            ),
+            (
+                f"/admin/communities/{C}/members/ex-00001/delivery-points",
+                f"/admin/communities/{C}/members/{{member_key}}/delivery-points",
+            ),
+            *(
+                (
+                    f"/admin/communities/{C}/members/ex-00001/{segment}",
+                    f"/admin/communities/{C}/members/{{member_key}}/{segment}",
+                )
+                for segment in ("profile", "name", "role", "area", "status")
+            ),
+            (
+                f"/admin/communities/{C}/members/ex-00001?purge=true",
+                f"/admin/communities/{C}/members/{{member_key}}?purge=true",
+            ),
+        ],
+    )
+    def test_the_member_key_leaves_the_path(self, raw, logged):
+        """@verifies REQ-0080"""
+        assert redact_path(raw) == logged
+        assert "ex-00001" not in redact_path(raw)
 
     def test_a_sensor_id_query_value_is_redacted_anywhere(self):
         """@verifies REQ-0080"""
@@ -198,7 +229,7 @@ class TestRedactPath:
         assert redact_path(path) == path
         assert (
             redact_path(f"/admin/communities/{C}/members/ex-00001/delivery-points/duplicates")
-            == f"/admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}}"
+            == f"/admin/communities/{C}/members/{{member_key}}/delivery-points/{{dp_id}}"
         )
         assert (
             redact_path(f"/admin/communities/{C}/delivery-points/duplicates/{DP}")
@@ -215,7 +246,7 @@ class TestRedactPath:
         raw = f"/admin/communities/{C}/members/ex-00001/delivery-points/{DP}?replaces={old}"
         logged = redact_path(raw)
         assert logged == (
-            f"/admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}}"
+            f"/admin/communities/{C}/members/{{member_key}}/delivery-points/{{dp_id}}"
             "?replaces={redacted}"
         )
         assert DP not in logged and old not in logged
@@ -225,11 +256,12 @@ class TestRedactPath:
         [
             "/health",
             f"/admin/communities/{C}/assets",
-            f"/admin/communities/{C}/members/ex-00001",
+            f"/admin/communities/{C}/members",
             "/admin/lookup/assets-by-sensor-ids",
             "/admin/lookup/assets-by-user-ids",
             f"/admin/communities/{C}/delivery-points",
-            f"/admin/communities/{C}/members/ex-00001/delivery-points",
+            f"/admin/communities/{C}/areas/area-1",
+            f"/admin/communities/{C}/topology/node-1",
             "/user/delivery-points",
         ],
     )
@@ -407,12 +439,12 @@ class TestTheAccessLine:
             await asyncio.sleep(0.01)
 
         assert len(lines) == 2 + len(requests), lines
-        assert not [line for line in lines if SENSOR in line], lines
+        assert not [line for line in lines if SENSOR in line or "ex-00001" in line], lines
 
         # Method, route shape and status are kept.
         joined = "\n".join(lines)
         assert (
-            f'"PUT /admin/communities/{C}/members/ex-00001/assets/{{asset_key}} HTTP/1.1" 20'
+            f'"PUT /admin/communities/{C}/members/{{member_key}}/assets/{{asset_key}} HTTP/1.1" 20'
             in joined
         )
         assert (
@@ -427,7 +459,7 @@ class TestTheAccessLine:
             in joined
         )
         assert (
-            f'"DELETE /admin/communities/{C}/members/ex-00001/assets/{{asset_key}} HTTP/1.1" 20'
+            f'"DELETE /admin/communities/{C}/members/{{member_key}}/assets/{{asset_key}} HTTP/1.1" 20'
             in joined
         )
 
@@ -463,7 +495,9 @@ class TestTheAccessLine:
             await asyncio.sleep(0.01)
 
         assert len(lines) == 1 + len(requests), lines
-        assert not [line for line in lines if USER in line or DP in line], lines
+        assert not [
+            line for line in lines if USER in line or DP in line or "ex-00001" in line
+        ], lines
 
         joined = "\n".join(lines)
         for logged in (
@@ -473,7 +507,7 @@ class TestTheAccessLine:
             f'"GET /admin/communities/{C}/delivery-points/by-id/{{dp_id}} HTTP/1.1" 200',
             '"GET /admin/lookup/community-by-delivery-point/{dp_id} HTTP/1.1" 200',
             f'"GET /admin/communities/{C}/delivery-points?limit=1&cursor={{redacted}} HTTP/1.1" 200',
-            f'"DELETE /admin/communities/{C}/members/ex-00001/delivery-points/{{dp_id}} HTTP/1.1" 20',
+            f'"DELETE /admin/communities/{C}/members/{{member_key}}/delivery-points/{{dp_id}} HTTP/1.1" 20',
         ):
             assert logged in joined, (logged, lines)
 

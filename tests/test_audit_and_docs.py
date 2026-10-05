@@ -131,6 +131,74 @@ class TestRefusalsAreRecorded:
         expected = "rec-registry.assets.write" if path == ASSET else "rec-registry.user"
         assert record["action"] == expected
 
+    def test_an_admin_refusal_names_the_route_template_not_the_path(self, monkeypatch, caplog):
+        """@verifies REQ-0091"""
+        client = _admin_client(monkeypatch, CALLER)
+
+        with caplog.at_level(logging.INFO, logger="celine.audit"):
+            r = client.put(ASSET, json=BODY)
+
+        assert r.status_code == 403
+        [record] = denials(caplog)
+        assert record["route"] == (
+            "/admin/communities/{community_key}/members/{member_key}/assets/{asset_key}"
+        )
+        assert_no_personal_data(caplog)
+
+    @pytest.mark.parametrize(
+        ("method", "path", "route"),
+        [
+            (
+                "PUT",
+                ASSET,
+                "/admin/communities/{community_key}/members/{member_key}/assets/{asset_key}",
+            ),
+            ("GET", "/user/assets/meter-sensor-01", "/user/assets/{asset_key}"),
+            # Served for GET only: the router answers 405, the record still names it.
+            ("PUT", "/user/member", "/user/member"),
+            # No route serves it: no template to name, and never the raw path.
+            ("GET", "/user/ex-00001", None),
+            ("PUT", "/admin/communities/example-rec/ex-00001", None),
+        ],
+    )
+    def test_a_rejected_token_names_the_route_template(
+        self, monkeypatch, caplog, method, path, route
+    ):
+        """@verifies REQ-0091"""
+        from celine.rec_registry.api.user import router as user_router
+
+        client = _admin_client(monkeypatch, None)
+        client.app.include_router(user_router)
+
+        with caplog.at_level(logging.INFO, logger="celine.audit"):
+            r = client.request(
+                method, path, json=BODY, headers={"authorization": "Bearer not-a-jwt"}
+            )
+
+        assert r.status_code == 401
+        [record] = denials(caplog)
+        assert record["method"] == method
+        assert record["route"] == route
+        assert "ex-00001" not in json.dumps(record)
+        assert_no_personal_data(caplog)
+
+    @pytest.mark.parametrize(
+        ("path", "resource"), [(ASSET, "example-rec"), ("/user/member", None)]
+    )
+    def test_a_rejected_token_names_the_community_of_the_path(
+        self, monkeypatch, caplog, path, resource
+    ):
+        """@verifies REQ-0091"""
+        client = _admin_client(monkeypatch, None)
+
+        with caplog.at_level(logging.INFO, logger="celine.audit"):
+            r = client.put(path, json=BODY, headers={"authorization": "Bearer not-a-jwt"})
+
+        assert r.status_code == 401
+        [record] = denials(caplog)
+        assert record["resource"] == resource
+        assert_no_personal_data(caplog)
+
     def test_no_token_at_all_records_nothing(self, monkeypatch, caplog):
         """@verifies REQ-0091"""
         client = _admin_client(monkeypatch, None)
