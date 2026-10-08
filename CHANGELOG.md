@@ -2,6 +2,89 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-10-08)
+
+### Bug Fixes
+
+- Cap sensors list to 500. closes #37
+  ([`3905dcd`](https://github.com/celine-eu/rec-registry/commit/3905dcd667dad17a95c2e666fe1ca7761fc6b1dd))
+
+- Cleanup refs
+  ([`49bdf7f`](https://github.com/celine-eu/rec-registry/commit/49bdf7fd77d044f08c7b3fa559f7f83b9f9be650))
+
+- Correct rego ref, closes #42
+  ([`01539c5`](https://github.com/celine-eu/rec-registry/commit/01539c5f2565f2414cf60eae70eb5ace5c1b96c1))
+
+- Remove nested extra, closes #41
+  ([`b13e00a`](https://github.com/celine-eu/rec-registry/commit/b13e00aec4457d6ca983b7bd562dfca0bb008782))
+
+- Retry on create/replace of assets
+  ([`38a529f`](https://github.com/celine-eu/rec-registry/commit/38a529f127c5b16849b99f01c508b32549dabc72))
+
+- Review alembic index, review tests. closes #39
+  ([`489b9e4`](https://github.com/celine-eu/rec-registry/commit/489b9e4c001120288b4dc4d771d326c7134f96fe))
+
+- Review uniqueness index, fail with 409 on duplicates. closes #40
+  ([`d0f7cbb`](https://github.com/celine-eu/rec-registry/commit/d0f7cbbe115cc3a879fff4a514acdc05ec64a7ab))
+
+- Review version handling, expose correct schema version. Closes #38
+  ([`6ee80aa`](https://github.com/celine-eu/rec-registry/commit/6ee80aaf76019a5dc23a605252ae71569e137444))
+
+### Chores
+
+- Drop the celine-sdk release TODOs now that 2.0.0 ships them
+  ([`35f0003`](https://github.com/celine-eu/rec-registry/commit/35f0003330ad154557d848e553625357120518f7))
+
+- Fix workflow
+  ([`1cee388`](https://github.com/celine-eu/rec-registry/commit/1cee388d66ff43c6b1e205f23a0076981766d7c7))
+
+- Update harness
+  ([`daa3147`](https://github.com/celine-eu/rec-registry/commit/daa3147f3165a918c7b23143f1ff3bd6060453c5))
+
+- Upgrade celine-sdk to 2.0.0
+  ([`32682dc`](https://github.com/celine-eu/rec-registry/commit/32682dc2147573ec4a592aceeb57e3670f7199a9))
+
+### Features
+
+- Add bulk lookup
+  ([`d3ea3a7`](https://github.com/celine-eu/rec-registry/commit/d3ea3a7e808c9f7155c3e23bf13137e1447ce5b3))
+
+- Add crud api, add tests
+  ([`2e8e1b1`](https://github.com/celine-eu/rec-registry/commit/2e8e1b1cf6a9a668bb5aa83ff9cdabe85292e2c5))
+
+- Add DID field, add v0.6 specs
+  ([`3bab32c`](https://github.com/celine-eu/rec-registry/commit/3bab32c627c04bc80a92a45d5b4eb63c7b87d79a))
+
+- Add editing to regisrty properties
+  ([`1f424ef`](https://github.com/celine-eu/rec-registry/commit/1f424ef3e6850fb385abcdc02347353492718cf2))
+
+- Add meter association, area association
+  ([`f840a0c`](https://github.com/celine-eu/rec-registry/commit/f840a0c5cedf646633b70d1be007b2be1a555d9b))
+
+- Extend area mapping
+  ([`1540ff6`](https://github.com/celine-eu/rec-registry/commit/1540ff6a05a01d31e59b865ef2696126baba68f9))
+
+- Grant member writes per field; one active holder per POD
+  ([`c49d425`](https://github.com/celine-eu/rec-registry/commit/c49d4250fd5b9c484b1814e2f4a36a3c34c0fed4))
+
+- Hold a meter's POD like a delivery point, answer self-service from the active member only, and
+  hold DIDs unique among active members, answer cross-community lookups from the active member only
+  ([`2cf0e63`](https://github.com/celine-eu/rec-registry/commit/2cf0e6337df4540095ff2171edcf7ef49bb126a3))
+
+- Name the route and community on refusals recorded before routing, and keep member keys out of the
+  access log
+  ([`727a321`](https://github.com/celine-eu/rec-registry/commit/727a321eb8829049d4ded6ff2b827dc60cce1cc2))
+
+- Read community shared delivery points
+  ([`da6c54d`](https://github.com/celine-eu/rec-registry/commit/da6c54da9de3d643ec1610fc8ddcd288ce515fda))
+
+- Record admin and self-service refusals on celine.audit, gate API docs outside dev
+  ([`9bbee6b`](https://github.com/celine-eu/rec-registry/commit/9bbee6b7277691400a1c3ecf683b0ddcccd1c264))
+
+- Update schema, update example refs
+  ([`9d7cc99`](https://github.com/celine-eu/rec-registry/commit/9d7cc991695a94576b80716a2dfa382dcf371f2c))
+
+
 ## v1.5.0 (2026-07-02)
 
 ### Bug Fixes
