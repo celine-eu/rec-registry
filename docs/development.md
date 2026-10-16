@@ -24,11 +24,11 @@
 | `CELINE_OIDC_AUDIENCE` | Expected token audience | `svc-rec-registry` |
 | `CELINE_OIDC_CLIENT_ID` / `CELINE_OIDC_CLIENT_SECRET` | The service's own client, if any | — |
 | `POLICIES_ENABLED` | Enable OPA policy evaluation | `true` |
-| `POLICIES_DIR` | Directory containing `.rego` files | `./policies` |
-| `POLICIES_DATA_DIR` | Optional directory for policy data JSON | — |
+| `CELINE_POLICIES_DIR` | Directory containing `.rego` files | `./policies` |
+| `CELINE_POLICIES_DATA_DIR` | Optional directory for policy data JSON | — |
 | `POLICIES_PACKAGE` | OPA package to evaluate | `celine.rec_registry.access` |
-| `POLICIES_CACHE_ENABLED` | Enable in-memory decision cache | `true` |
-| `POLICIES_CACHE_TTL` | Cache TTL in seconds | `300` |
+| `CELINE_POLICIES_CACHE_ENABLED` | Enable in-memory decision cache | `true` |
+| `CELINE_POLICIES_CACHE_TTL` | Cache TTL in seconds | `300` |
 
 ## Development defaults and `CELINE_ENV`
 

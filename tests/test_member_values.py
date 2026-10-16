@@ -302,7 +302,7 @@ class TestThroughThePolicy:
         from celine.rec_registry.db.session import get_session
 
         monkeypatch.setattr(mw.settings, "policies_enabled", True)
-        monkeypatch.setattr(mw.settings, "policies_cache_enabled", False)
+        monkeypatch.setattr(mw.settings.policies, "policies_cache_enabled", False)
 
         async def as_caller(self, request):
             return JwtUser(sub="svc-example", claims={"scope": scopes})

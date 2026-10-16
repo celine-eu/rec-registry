@@ -56,8 +56,9 @@ def create_app():
     #   issuer and keys every JWT is verified against (always verified)
     # - AUTH_ENABLED, AUTH_HEADER_NAME: optional user extraction on paths
     #   outside /admin and /user, which always require a JWT
-    # - POLICIES_ENABLED, POLICIES_DIR, POLICIES_DATA_DIR, POLICIES_PACKAGE,
-    #   POLICIES_CACHE_*: the Rego bundle evaluated in-process for /admin
+    # - POLICIES_ENABLED, POLICIES_PACKAGE, and the platform's CELINE_POLICIES_DIR,
+    #   CELINE_POLICIES_DATA_DIR, CELINE_POLICIES_CACHE_*: the Rego bundle
+    #   evaluated in-process for /admin
     # Turning AUTH_ENABLED or POLICIES_ENABLED off is refused unless
     # CELINE_ENV=dev (REQ-0088).
     app.add_middleware(PolicyMiddleware)

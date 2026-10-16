@@ -108,7 +108,7 @@ def _client(monkeypatch, claims: dict | None = None):
     from celine.rec_registry.db.session import get_session
 
     monkeypatch.setattr(mw.settings, "policies_enabled", True)
-    monkeypatch.setattr(mw.settings, "policies_cache_enabled", False)
+    monkeypatch.setattr(mw.settings.policies, "policies_cache_enabled", False)
 
     if claims is not None:
 

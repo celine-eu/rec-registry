@@ -62,7 +62,7 @@ def _admin_client(monkeypatch, caller: JwtUser | None) -> TestClient:
     from celine.rec_registry.api.admin.writes import router as writes_router
 
     monkeypatch.setattr(mw.settings, "policies_enabled", True)
-    monkeypatch.setattr(mw.settings, "policies_cache_enabled", False)
+    monkeypatch.setattr(mw.settings.policies, "policies_cache_enabled", False)
 
     async def as_caller(self, request):
         return caller

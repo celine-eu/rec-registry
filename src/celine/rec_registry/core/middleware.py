@@ -148,15 +148,15 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             try:
                 # Create base engine
                 engine = PolicyEngine(
-                    policies_dir=settings.policies_dir,
-                    data_dir=settings.policies_data_dir,
+                    policies_dir=settings.policies.policies_dir,
+                    data_dir=settings.policies.policies_data_dir,
                 )
                 engine.load()
 
                 # Wrap with cache
                 self._policy_engine = CachedPolicyEngine(
                     engine=engine,
-                    enabled=settings.policies_cache_enabled,
+                    enabled=settings.policies.policies_cache_enabled,
                 )
 
                 logger.info(
