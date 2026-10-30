@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-10-30)
+
+### Features
+
+- Normalize use of env CELINE_POLICIES*
+  ([`e987e4d`](https://github.com/celine-eu/rec-registry/commit/e987e4ddee770a93fc978934ce65f0d9830c067a))
+
+- **export**: A member export without member identity (REQ-0100)
+  ([`eef6459`](https://github.com/celine-eu/rec-registry/commit/eef6459da72d75e8667ff056654f0b4ebdfc6c74))
+
+
 ## v1.6.0 (2026-10-08)
 
 ### Bug Fixes
