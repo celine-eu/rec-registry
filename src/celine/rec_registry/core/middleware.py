@@ -328,7 +328,7 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             return "admin"
 
         if head == "export":
-            if rest == ["export"] and method in _READ_METHODS:
+            if rest in (["export"], ["export", "members"]) and method in _READ_METHODS:
                 return "export"
             return "admin"
 

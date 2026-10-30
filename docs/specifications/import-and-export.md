@@ -160,3 +160,18 @@ community (REQ-0006). On a deployed realm a bundle carries a community's adminis
 only, and members arrive through onboarding; members loaded from a file are for local
 development. Decided in
 [ADR-0009](../decisions/ADR-0009-a-community-is-retired-by-a-forced-empty-import.md).
+
+### REQ-0100 — the member export carries the membership and nothing that names a member
+
+`GET /admin/export/members` answers JSON, `{"communities": [...]}`, one entry per community:
+its key, each area's `boundary_id` and `topology_ids`, and every member — **whatever its
+status** — with exactly its `key`, `area`, `role`, `type`, `status` and `sensor_ids` (the
+sensor ids of its meters). Nothing else: no user id, name, DID, delivery point, extra, area
+geometry or asset property other than a meter's sensor id. `community` may be repeated to
+name the communities; an unknown one is `404`. Members are ordered by key.
+
+It is read under the `export` action (`rec-registry.export`), like the full export, and is
+the route the data pipelines read: they need who belongs where with which meters, not who
+the person is. The full export (REQ-0037) stays the backup and carries everything; a caller
+that needs only the membership is given this one instead. Inactive members are exported with
+their status rather than left out, so a reader can tell a suspended member from a deleted one.

@@ -145,6 +145,14 @@ curl "http://localhost:8004/admin/export" \
   -o communities.yaml
 ```
 
+### Member export — `GET /admin/export/members`
+
+The membership only, as JSON: per community its areas' boundary and topology node ids, per
+member its key, area, role, type, status and meter sensor ids — no user id, name, DID,
+delivery point or extra (REQ-0100). It is what the data pipelines read, and it cannot be
+re-imported: use `GET /admin/export` for a backup. See the
+[API reference](api-reference.md#get-adminexportmembers).
+
 ### CLI Export
 
 ```bash

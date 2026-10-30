@@ -183,6 +183,54 @@ async def export_community_bundle_yaml(
     return dump_yaml(bundle)
 
 
+async def export_member_view(session: AsyncSession, *, community_key: str) -> dict:
+    """
+    What the pipelines read about a community's members, and nothing that names one.
+
+    The community key, each area's boundary id and topology node ids, and per member
+    its key, area, role, type, status and meter sensor ids — every member, whatever
+    its status (REQ-0100). No user id, name, DID, delivery point, extra or asset
+    property other than a meter's sensor id: the pipelines need the membership, not
+    the person.
+
+    Raises:
+        KeyError: If community not found
+    """
+    community = await session.scalar(
+        select(Community)
+        .options(selectinload(Community.members).selectinload(Member.assets))
+        .where(Community.key == community_key)
+    )
+    if community is None:
+        raise KeyError(f"Community not found: {community_key}")
+
+    areas: dict[str, dict[str, Any]] = {}
+    for area_key, area_data in sorted((community.areas or {}).items()):
+        boundary = (area_data or {}).get("boundary")
+        areas[area_key] = {
+            "boundary_id": boundary.get("id") if isinstance(boundary, dict) else None,
+            "topology_ids": list((area_data or {}).get("topology") or []),
+        }
+
+    members = [
+        {
+            "key": member.key,
+            "area": member.area,
+            "role": member.role,
+            "type": (member.extra or {}).get("type"),
+            "status": member.status,
+            "sensor_ids": sorted(
+                asset.sensor_id
+                for asset in member.assets
+                if asset.asset_type == "meter" and asset.sensor_id
+            ),
+        }
+        for member in sorted(community.members, key=lambda m: m.key)
+    ]
+
+    return {"community": community.key, "areas": areas, "members": members}
+
+
 def _build_asset_collection(assets: list[Asset]) -> dict:
     """Build asset collection dict organized by type."""
     collection: dict[str, dict] = {

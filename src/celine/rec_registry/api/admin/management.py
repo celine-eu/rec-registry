@@ -24,7 +24,7 @@ from celine.rec_registry.services.importer import (
     import_refusals,
     replacement_import_bundle,
 )
-from celine.rec_registry.services.exporter import export_community_bundle
+from celine.rec_registry.services.exporter import export_community_bundle, export_member_view
 from celine.rec_registry.core.yaml_io import load_yaml_all, dump_yaml, dump_yaml_all
 
 router = APIRouter()
@@ -210,3 +210,32 @@ async def admin_export(
         return PlainTextResponse(content=dump_yaml(docs[0]))
 
     return PlainTextResponse(content=dump_yaml_all(docs))
+
+
+@router.get("/export/members")
+async def admin_export_members(
+    community: list[str] | None = Query(None, description="Community key(s) to export; omit to export all"),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Export the membership of one or more communities, without member identity.
+
+    What the pipelines read (REQ-0100): per community its key and each area's
+    boundary id and topology node ids; per member its key, area, role, type,
+    status and meter sensor ids, every member whatever its status. No user id,
+    name, DID, delivery point or extra. Granted by `rec-registry.export`, like
+    the full export.
+    """
+    if not community:
+        keys = sorted(await session.scalars(select(Community.key)))
+    else:
+        keys = community
+
+    communities = []
+    for key in keys:
+        try:
+            communities.append(await export_member_view(session, community_key=key))
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    return {"communities": communities}

@@ -22,7 +22,7 @@ satisfies (REQ-0065).
 | `members.purge` | `DELETE …/members/{key}?purge=true` | `rec-registry.members.purge` |
 | `assets.write` | write methods on `…/assets…` | `rec-registry.assets.write` |
 | `community.write` | write methods on a community, its areas (the area rename included) or its topology nodes | `rec-registry.community.write` |
-| `import` / `export` | `/admin/import*`, `/admin/export` | `rec-registry.import` / `.export` |
+| `import` / `export` | `/admin/import*`, `/admin/export`, `/admin/export/members` | `rec-registry.import` / `.export` |
 | `lookup` | `/admin/lookup/*` | `rec-registry.lookup` |
 | `assets.lookup` | `/admin/lookup/assets-by-user-ids`, `/admin/lookup/members-by-dids` | `rec-registry.lookup` |
 
@@ -369,6 +369,33 @@ invariant refuses the whole request as `POST /admin/import` does.
 Export communities as YAML multidocument.
 
 **Response:** `text/plain` — YAML bundle(s).
+
+### `GET /admin/export/members`
+
+The membership of one or more communities, without member identity (REQ-0100): what the
+data pipelines read. `community` may be repeated; omitted, every community is exported, and
+an unknown one is `404`. Granted by `rec-registry.export`.
+
+**Response:** `application/json`
+
+```json
+{
+  "communities": [
+    {
+      "community": "example-rec",
+      "areas": {
+        "north": {"boundary_id": "AC000E00001", "topology_ids": ["AC000E00001"]}
+      },
+      "members": [
+        {"key": "ex-00001", "area": "north", "role": "consumer",
+         "type": "schema:Person", "status": "active", "sensor_ids": ["ex-sensor-0001"]}
+      ]
+    }
+  ]
+}
+```
+
+Every member is listed whatever its status. No user id, name, DID, delivery point or extra.
 
 ---
 
