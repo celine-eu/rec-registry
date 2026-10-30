@@ -33,7 +33,7 @@ service that registers approved participants needs `members.write`, one that
 attaches meters needs `assets.write`, one that corrects a member's area needs
 `members.area.write` — which reaches that one route and nothing else (ADR-0011) — and none
 has any business importing, exporting or purging. A member field is granted alone; identity
-(`user_id`, `did`, status, creating a member) is `members.write` only.
+(`user_id`, `did`, `subject`, status, creating a member) is `members.write` only.
 
 Interactive OpenAPI docs are available at `http://localhost:8004/docs` under `CELINE_ENV=dev`,
 or with `CELINE_PUBLIC_DOCS=true` (REQ-0092).
@@ -395,7 +395,8 @@ an unknown one is `404`. Granted by `rec-registry.export`.
 }
 ```
 
-Every member is listed whatever its status. No user id, name, DID, delivery point or extra.
+Every member is listed whatever its status. No user id, account subject, name, DID,
+delivery point or extra.
 
 ---
 
@@ -419,6 +420,10 @@ that reads correctly in an exported bundle.
 `did` is optional and unique across the whole registry, unlike `key` and
 `user_id`, which are unique per community. It is usually written afterwards
 rather than here — see `PATCH` below.
+
+`subject` is optional: the Keycloak `sub` of the account `user_id` names. It must
+be a UUID (`422` otherwise) and is stored lower-case. It is written, never read
+back here: no member answer carries it, only the full export (REQ-0101).
 
 `extra` is optional, and its keys are merged into the member's `extra` at the
 top level — the same place `PATCH` puts them. Other body keys that are not member
@@ -446,6 +451,10 @@ delivery-point routes.
 **This is how a member's dataspace `did` is written**, because the identity is
 minted a step after the member is registered. Re-sending a member the DID it
 already holds is a `200` that changes nothing, so the write is safe to retry.
+
+`subject` is accepted here too, with the create route's rule (a UUID, `422`
+otherwise); `null` leaves it alone. It is how `backfill-subjects` writes it
+(REQ-0102).
 
 **Responses:** `200`; `409 user_id_taken` if the new `user_id` belongs to another
 member of the community, or `409 did_taken` if the new `did` belongs to any other

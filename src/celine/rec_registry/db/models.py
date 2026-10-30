@@ -123,6 +123,7 @@ class Member(Base):
     - key: internal member key (e.g., "ex-00001")
     - user_id: Keycloak username the participant authenticates with — not a subject UUID
     - did: dataspace decentralised identifier, globally unique, absent until minted
+    - subject: Keycloak `sub` of the account `user_id` names, absent until known
     - role: consumer, prosumer, producer, operator, admin
     - status: pending, active, suspended, inactive
     - area: reference to community area key
@@ -192,6 +193,20 @@ class Member(Base):
     # ever being live again, in any community. Release leaves the DID on the
     # row: the partial index is what frees it, so nothing has to be erased.
     did: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # The account subject: the Keycloak `sub` of the account `user_id` names,
+    # a UUID in canonical lower-case form (REQ-0101).
+    #
+    # **Not an identifier anything here resolves by.** Every route still finds
+    # its member by `user_id`; the subject is carried for the member mirrors of
+    # the intermediate environments, which create each mirrored account under
+    # prod's id. So it has no index, no uniqueness rule, and no read but the
+    # full export, which is the backup and has to restore it.
+    #
+    # Nullable: a member can exist before its account. Rows written before the
+    # column existed are filled by `celine-rec-registry backfill-subjects`
+    # (REQ-0102).
+    subject: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     name: Mapped[str] = mapped_column(String(256), nullable=False)
 

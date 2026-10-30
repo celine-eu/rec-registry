@@ -114,6 +114,8 @@ _MEMBER_COLUMNS = {
     # `did` would validate, import, and leave one member holding two records of
     # its DID that disagree.
     "did",
+    # A column too, for the same reason (REQ-0101).
+    "subject",
     "name",
     "type",
     "role",
@@ -685,6 +687,7 @@ async def create_member(
         key=key,
         user_id=member_in.user_id,
         did=member_in.did,
+        subject=member_in.subject,
         name=member_in.name,
         role=member_in.role,
         area=member_in.area,
@@ -788,8 +791,11 @@ async def apply_member_patch(
     as an update to a row that already exists rather than as a field on the
     create. Its uniqueness clash is answered by the caller — see
     ``api/admin/writes.py::patch_member``.
+
+    ``subject`` is patchable for the same reason, and has no clash to answer:
+    nothing is unique about it (REQ-0101).
     """
-    for field in ("name", "role", "area", "status", "user_id", "did"):
+    for field in ("name", "role", "area", "status", "user_id", "did", "subject"):
         if field in patch and patch[field] is not None:
             setattr(member, field, patch[field])
 

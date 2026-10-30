@@ -79,6 +79,7 @@ celine-rec-registry duplicate-sensors                              # read-only; 
 celine-rec-registry duplicate-delivery-points                      # read-only; exits 1 if a POD has two active holders
 celine-rec-registry out-of-set-values                              # read-only; exits 1 if a role, status or area is out of set
 celine-rec-registry invalid-area-boundaries                        # read-only; exits 1 if a stored area breaks the one-substation or area-key rule
+celine-rec-registry backfill-subjects [--apply]                    # members' account subjects from Keycloak by username; dry run by default; counts only
 ```
 
 A refusal a caller acts on answers `{"detail": "<sentence>", "code": "<code>"}` —

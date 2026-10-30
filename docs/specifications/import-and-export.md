@@ -166,8 +166,8 @@ development. Decided in
 `GET /admin/export/members` answers JSON, `{"communities": [...]}`, one entry per community:
 its key, each area's `boundary_id` and `topology_ids`, and every member — **whatever its
 status** — with exactly its `key`, `area`, `role`, `type`, `status` and `sensor_ids` (the
-sensor ids of its meters). Nothing else: no user id, name, DID, delivery point, extra, area
-geometry or asset property other than a meter's sensor id. `community` may be repeated to
+sensor ids of its meters). Nothing else: no user id, account subject (REQ-0101), name, DID,
+delivery point, extra, area geometry or asset property other than a meter's sensor id. `community` may be repeated to
 name the communities; an unknown one is `404`. Members are ordered by key.
 
 It is read under the `export` action (`rec-registry.export`), like the full export, and is

@@ -171,3 +171,39 @@ class TestTheDidIndexCoversActiveMembersOnly:
         command.upgrade(config, "head")
         conn.commit()
         assert "WHERE" in self._did_index(conn)
+
+
+@pytest.mark.integration
+class TestTheSubjectColumn:
+    def _column(self, conn):
+        return conn.execute(
+            text(
+                "select is_nullable, data_type from information_schema.columns "
+                "where table_schema = :schema and table_name = 'member' "
+                "and column_name = 'subject'"
+            ),
+            {"schema": SCHEMA},
+        ).first()
+
+    def test_it_is_nullable_and_goes_down_and_up_again(self, migrated_connection):
+        """`0004` adds `member.subject`, nullable; its downgrade drops it and
+        leaves the rest of the member as `0003` built it.
+
+        @verifies REQ-0101
+        """
+        conn = migrated_connection
+        column = self._column(conn)
+        assert column is not None
+        assert column.is_nullable == "YES"
+
+        config = Config(str(REPO_ROOT / "alembic.ini"))
+        config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        config.attributes["connection"] = conn
+
+        command.downgrade(config, "0003_member_did_active_only")
+        conn.commit()
+        assert self._column(conn) is None
+
+        command.upgrade(config, "head")
+        conn.commit()
+        assert self._column(conn) is not None

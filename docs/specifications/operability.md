@@ -119,6 +119,38 @@ the check blocks either. Decided in
 [ADR-0013](../decisions/ADR-0013-duplicate-delivery-points-are-reported-to-the-operator.md),
 which amends ADR-0012.
 
+### REQ-0102 — the CLI fills in members' account subjects from Keycloak, and prints only counts
+
+`celine-rec-registry backfill-subjects` reads every community through `GET /admin/export`
+and, for each member of any status, looks up the Keycloak account whose username is the
+member's `user_id` — the realm's Admin API user search, `exact`, its answer filtered again
+to the username itself, compared case-insensitively; one search per distinct username. A
+member holding no `subject` whose username names exactly one account is given that
+account's id through `PATCH /admin/communities/{ck}/members/{mk}` (REQ-0101).
+
+- **Dry run unless `--apply`.** Without it nothing is written.
+- **Never replaces a subject.** A member already holding one is not written to; one that
+  differs from Keycloak's is counted as `differs`. No account (`no_account`) and two
+  (`ambiguous`) leave the member as it is.
+- **Idempotent.** A second run finds the members it wrote as `already_set` and writes nothing.
+- **Every lookup before the first write.** A Keycloak failure exits `2` with nothing written;
+  so does an unreadable registry, before Keycloak is asked anything.
+- **Counts only.** It prints `examined`, `would_set` (dry run) or `set`, `already_set`,
+  `no_account`, `ambiguous`, `differs` and `failed`, tab-separated, and never a member key,
+  username, e-mail or subject — a Keycloak failure is reported by status alone, because the
+  request carries the username.
+
+It exits `0`, `1` when any member differs, is ambiguous or failed to write, and `2` when the
+registry or Keycloak cannot be read. The Keycloak token needs `view-users` in the realm:
+`--keycloak-token`, or `--keycloak-client-id`/`--keycloak-client-secret`; without either the
+registry's own token is presented. The Admin API URL is derived from `--auth-url`
+(`…/realms/<realm>` → `…/admin/realms/<realm>`) unless `--keycloak-url` names it.
+
+A member written between the export read and its `PATCH` is not re-read. Nothing else
+writes a subject onto an existing member: onboarding sends it only on the create (onboarding
+REQ-0052), so a member the run plans to write held no subject when it was read and is given
+none by anyone else.
+
 ### REQ-0087 — a community's shared delivery points are readable per community, naming no one outside it
 
 `GET /admin/communities/{ck}/delivery-points/duplicates` answers `200` with
@@ -237,7 +269,8 @@ person.
 - **The CLI's other commands.** `list`, `tree`, `lookup-user` and `lookup-sensor` have no
   tests. So does `config`, and so does the authentication flow — every CLI test passes
   `--token` directly, so neither the client-credentials nor the password grant is
-  exercised.
+  exercised. `backfill-subjects` (REQ-0102) runs against a mocked Keycloak: its token
+  request is never made, and the Admin API's own answer shape and permission are assumed.
 - **Startup.** `create_app` wiring, settings loading, and the policy engine's bundle load
   at boot. A service that starts with an unloadable Rego bundle is not something any test
   here would notice.

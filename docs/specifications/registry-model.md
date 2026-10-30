@@ -213,6 +213,33 @@ The bundle import is held by the same index; a clash there is not translated (as
 Nothing that reads by DID changes: `members-by-dids` (REQ-0061) may now return an inactive row
 beside the active one, each carrying its `status` and `community_key`.
 
+### REQ-0101 — a member may hold its account subject, and only the full export reads it back
+
+`subject` is optional on `MemberIn`, on member create and on `PATCH`, and stored in its
+**own column** beside `user_id`: the Keycloak `sub` of the account `user_id` names. It must
+be a UUID, and is held in its canonical form (lower-case, hyphenated); anything else is
+`422` and nothing is written — on the import too. The value most likely to arrive by mistake
+is a username, the mistake `user_id` invites the other way round (REQ-0053).
+
+**Optional**, because a member can exist before its account. A `PATCH` that does not name
+it, or names it `null`, leaves it as it is. It has no index and no uniqueness rule: nothing
+here resolves a member by it, and every route still finds its member by `user_id`.
+
+**Both write paths carry it, and the full export does too.** A member created through the
+admin API and one that arrived in a YAML bundle hold the subject in the same column, the
+full export (`GET /admin/export`, REQ-0037) writes it when a member has one and omits the
+key otherwise, and a re-import restores it: the full export is the backup, and a restore
+that dropped the subject would unlink every member from its account. `subject` is a member
+key the published v0.7 schema does not declare and permits (its members allow other
+properties); no schema version is published for it.
+
+**No other read carries it**: not the member read, list, create or `PATCH` answer, not the
+lookups, not self-service, and not the member export (REQ-0100). It is written for the
+member mirrors of the intermediate environments, which create each mirrored account under
+prod's id; a mirror reads it from an export of its own, not from these routes.
+
+Rows written before the column existed are filled by `backfill-subjects` (REQ-0102).
+
 ### REQ-0066 — role and status are closed sets on every write path, and a member's area is one of its community's
 
 `role` must be one of `consumer`, `prosumer`, `producer`, `operator`, `admin`, and `status` one

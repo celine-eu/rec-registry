@@ -28,6 +28,7 @@ A participant belonging to a community.
 | `key` | `str` | Unique member identifier within the community |
 | `user_id` | `str` | Keycloak **username** the participant authenticates with — not a subject UUID |
 | `did` | `str?` | Dataspace decentralised identifier. Optional, unique among active members across the whole registry (REQ-0096) |
+| `subject` | `str?` | Keycloak `sub` of the account `user_id` names, a UUID. Optional; read back only by the full export (REQ-0101) |
 | `name` | `str` | Display name |
 | `role` | `str` | `consumer`, `prosumer`, `producer`, `operator`, or `admin` — enforced on every write path |
 | `area` | `str` | A key of the community's `areas` — enforced on every write path; rewritten by an area rename (REQ-0079) |
@@ -41,6 +42,11 @@ in the dataspace. `user_id` matches `preferred_username` in the token — a row 
 a subject UUID exports cleanly and locks its owner out. `did` arrives after registration
 (the identity is minted a step later) and is absent entirely in a deployment with no
 dataspace.
+
+`subject` is not a fourth way to find a member: nothing resolves by it, and no member read,
+lookup or self-service answer carries it. It is the account's own id, written at
+provisioning (or by `celine-rec-registry backfill-subjects`), for the member mirrors of the
+intermediate environments, which create each mirrored account under prod's id.
 
 ### Asset
 

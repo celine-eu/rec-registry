@@ -8,7 +8,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
-from celine.rec_registry.schemas.bundle import AreaBoundaryIn, MemberIn
+from celine.rec_registry.schemas.bundle import AccountSubject, AreaBoundaryIn, MemberIn
 
 T = TypeVar("T")
 
@@ -555,6 +555,10 @@ class MemberPatch(BaseModel):
     # another member already holds is `409`; re-sending a member its own DID is
     # a no-op success, because that write sits inside a retriable step.
     did: str | None = None
+    # The account subject, for a member registered before its account was known
+    # and for `backfill-subjects` (REQ-0101, REQ-0102). Written, never read back
+    # here: no member answer carries it.
+    subject: AccountSubject | None = None
     name: str | None = None
     type: str | None = None
     role: str | None = None

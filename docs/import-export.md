@@ -57,6 +57,9 @@ members:
     # written by `PATCH` at runtime rather than authored here — and omitted from
     # an export entirely when the member has none.
     did: "did:web:dataspace.example%3A30005:alice"
+    # Optional. The Keycloak `sub` of the account `user_id` names, a UUID —
+    # written at provisioning, and omitted from an export when the member has none.
+    subject: "0b6f6c3e-8d2a-4c41-9f0e-5a7d2c1b9e10"
     name: Alice Rossi
     role: prosumer
     area: northern
@@ -91,6 +94,10 @@ a `primary_substation` node of `community.topology`. No two areas of one communi
 same `boundary.id`. See [`schemas/community/v0.7/README.md`](../schemas/community/v0.7/README.md).
 The registry stores the reference, never a shape, and does not check the code against the GSE
 dataset.
+
+`member.subject` (REQ-0101) is carried by the import and the full export, and is not part of
+a published schema version: the v0.7 schema lets a member carry other keys, so a v0.7 file
+with it is still a valid v0.7 one. A value that is not a UUID refuses the import.
 
 v0.6 added `member.did` and changed nothing else, so a v0.5 file is a valid v0.6 one. **A v0.6
 file with areas is not a valid v0.7 one**, and the import refuses it — not for the version it
@@ -148,7 +155,7 @@ curl "http://localhost:8004/admin/export" \
 ### Member export — `GET /admin/export/members`
 
 The membership only, as JSON: per community its areas' boundary and topology node ids, per
-member its key, area, role, type, status and meter sensor ids — no user id, name, DID,
+member its key, area, role, type, status and meter sensor ids — no user id, account subject, name, DID,
 delivery point or extra (REQ-0100). It is what the data pipelines read, and it cannot be
 re-imported: use `GET /admin/export` for a backup. See the
 [API reference](api-reference.md#get-adminexportmembers).

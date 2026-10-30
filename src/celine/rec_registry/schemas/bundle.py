@@ -15,8 +15,9 @@ Supports:
 
 from __future__ import annotations
 
-from typing import Any
-from pydantic import BaseModel, Field, ConfigDict
+import uuid
+from typing import Annotated, Any
+from pydantic import AfterValidator, BaseModel, Field, ConfigDict
 from pydantic.json_schema import SkipJsonSchema
 
 from celine.rec_registry.core.versions import (
@@ -327,6 +328,24 @@ class AssetCollectionIn(BaseModel):
 # Member
 # =============================================================================
 
+def canonical_subject(value: str) -> str:
+    """A Keycloak account id in its canonical form, or a validation error.
+
+    Keycloak ids are UUIDs, so anything else is refused rather than stored:
+    the value most likely to arrive here by mistake is a username, which is
+    what `user_id` holds (REQ-0053), and a subject that names no account would
+    pass every listing and point the mirrors at nobody (REQ-0101).
+    """
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("subject must be a Keycloak account id, a UUID") from None
+
+
+#: A member's account subject: the Keycloak `sub`, held lower-case and hyphenated.
+AccountSubject = Annotated[str, AfterValidator(canonical_subject)]
+
+
 class MemberIn(BaseModel):
     """Community member."""
     model_config = ConfigDict(extra="allow")
@@ -336,6 +355,10 @@ class MemberIn(BaseModel):
     # member is registered, and never at all in a deployment with no dataspace —
     # so a bundle written before this field existed still parses.
     did: str | None = None
+    # The Keycloak `sub` of the account `user_id` names. Optional because a
+    # member can exist before its account, and because a bundle written before
+    # this field existed still has to parse (REQ-0101).
+    subject: AccountSubject | None = None
     name: str
     type: str | None = None  # schema.org type CURIE: schema:Person, schema:GovernmentOrganization, schema:LocalBusiness, schema:Organization, …
     role: str  # consumer, prosumer, producer, operator, admin

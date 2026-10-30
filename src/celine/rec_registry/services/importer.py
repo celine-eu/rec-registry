@@ -538,6 +538,7 @@ async def replacement_import_bundle(
             key=member_key,
             user_id=member_data.user_id,
             did=member_data.did,
+            subject=member_data.subject,
             name=member_data.name,
             role=member_data.role,
             area=member_data.area,

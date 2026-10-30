@@ -11,6 +11,7 @@ Commands:
 - duplicate-delivery-points: Report delivery points held by more than one active member (read-only)
 - out-of-set-values: Report members whose role, status or area is out of set (read-only)
 - invalid-area-boundaries: Report stored areas breaking the one-substation rule (read-only)
+- backfill-subjects: Fill in members' account subjects from Keycloak, by username (dry run by default)
 
 Authentication:
 - Client credentials: --client-id + --client-secret (admin operations)
@@ -21,8 +22,12 @@ Authentication:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import typer
@@ -1597,6 +1602,329 @@ def invalid_area_boundaries(
         err=True,
     )
     raise typer.Exit(1)
+
+
+# =============================================================================
+# Subject Backfill
+# =============================================================================
+
+
+@dataclass
+class SubjectBackfill:
+    """What a ``backfill-subjects`` run found, before anything is written.
+
+    ``to_set`` is ``(community key, member key, subject)`` for each member that
+    holds no subject and whose username names exactly one Keycloak account. The
+    counts cover every member examined; they are what the command prints.
+    """
+
+    examined: int = 0
+    to_set: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    already_set: int = 0
+    no_account: int = 0
+    ambiguous: int = 0
+    differs: int = 0
+
+
+def plan_subject_backfill(
+    bundles: list[dict[str, Any]],
+    find_subjects: Callable[[str], list[str]],
+) -> SubjectBackfill:
+    """Decide, for every exported member, whether its subject can be filled in.
+
+    ``find_subjects(username)`` answers the ids of the Keycloak accounts whose
+    username is exactly ``username``, and is asked once per distinct username.
+    Members of every status are covered: an inactive member's account still
+    exists, and the mirrors carry inactive members too.
+
+    A member already holding a subject is never planned for a write. When
+    Keycloak names another account it is counted in ``differs``, for somebody
+    to look at — replacing it would re-link a member to an account nobody chose.
+    No account leaves the member as it is (a member can exist before its
+    account), and so do two (no answer is better than a guessed one).
+    """
+    plan = SubjectBackfill()
+    answers: dict[str, list[str]] = {}
+
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        community_key = str((bundle.get("community") or {}).get("id", ""))
+        for member_key, member in (bundle.get("members") or {}).items():
+            if not isinstance(member, dict):
+                continue
+            username = str(member.get("user_id") or "").strip()
+            if not username:
+                continue
+            plan.examined += 1
+
+            if username not in answers:
+                answers[username] = list(dict.fromkeys(find_subjects(username)))
+            found = answers[username]
+
+            held = str(member.get("subject") or "").strip().lower()
+            if not found:
+                plan.no_account += 1
+            elif len(found) > 1:
+                plan.ambiguous += 1
+            elif held:
+                if held == found[0].lower():
+                    plan.already_set += 1
+                else:
+                    plan.differs += 1
+            else:
+                plan.to_set.append((community_key, str(member_key), found[0].lower()))
+
+    return plan
+
+
+def keycloak_admin_url(auth_url: str) -> str:
+    """The realm's Admin API root, from its OIDC realm URL.
+
+    ``https://kc.example/realms/celine`` →
+    ``https://kc.example/admin/realms/celine``; a ``/auth`` context path before
+    ``/realms`` is kept.
+    """
+    base, sep, realm = auth_url.rstrip("/").rpartition("/realms/")
+    if not sep or not realm:
+        raise typer.BadParameter(
+            f"--auth-url {auth_url!r} names no realm; pass --keycloak-url"
+        )
+    return f"{base}/admin/realms/{realm}"
+
+
+class _KeycloakUnreadable(Exception):
+    """Keycloak's user search could not be read. Carries a status, never a name."""
+
+
+def _keycloak_subjects(admin_url: str, token: str, timeout: float) -> Callable[[str], list[str]]:
+    """``find_subjects`` over Keycloak's user search, ``exact`` on the username.
+
+    The search is asked for the exact name and its answer is filtered again:
+    an account counts only when its username *is* the member's ``user_id``
+    (compared case-insensitively — Keycloak holds usernames lower-case).
+
+    A failure raises :class:`_KeycloakUnreadable` with the status alone: the
+    request's URL carries the username, so neither it nor the exception text is
+    ever printed.
+    """
+    url = f"{admin_url.rstrip('/')}/users"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def find(username: str) -> list[str]:
+        try:
+            r = httpx.get(
+                url,
+                params={"username": username, "exact": "true", "briefRepresentation": "true"},
+                headers=headers,
+                timeout=timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise _KeycloakUnreadable(type(exc).__name__) from None
+        if r.status_code >= 400:
+            raise _KeycloakUnreadable(str(r.status_code))
+        try:
+            users = r.json()
+        except ValueError:
+            raise _KeycloakUnreadable("unreadable answer") from None
+        if not isinstance(users, list):
+            raise _KeycloakUnreadable("unreadable answer")
+        wanted = username.lower()
+        return [
+            str(u["id"])
+            for u in users
+            if isinstance(u, dict)
+            and u.get("id")
+            and str(u.get("username") or "").lower() == wanted
+        ]
+
+    return find
+
+
+@app.command("backfill-subjects")
+def backfill_subjects(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write the subjects found. Without it nothing is written (dry run).",
+    ),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT access token for the registry",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID for the registry",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret for the registry",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Username",
+        envvar="REGISTRY_USER",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="User password",
+        envvar="REGISTRY_PASSWORD",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope",
+        envvar="REGISTRY_SCOPE",
+    ),
+    keycloak_url: str | None = typer.Option(
+        None,
+        "--keycloak-url",
+        help="Keycloak Admin API realm URL (default: derived from --auth-url)",
+        envvar="KEYCLOAK_ADMIN_URL",
+    ),
+    keycloak_token: str | None = typer.Option(
+        None,
+        "--keycloak-token",
+        help="Pre-obtained JWT for Keycloak's Admin API (needs view-users)",
+        envvar="KEYCLOAK_TOKEN",
+    ),
+    keycloak_client_id: str | None = typer.Option(
+        None,
+        "--keycloak-client-id",
+        help="OAuth2 client ID holding view-users in the realm",
+        envvar="KEYCLOAK_CLIENT_ID",
+    ),
+    keycloak_client_secret: str | None = typer.Option(
+        None,
+        "--keycloak-client-secret",
+        help="OAuth2 client secret for --keycloak-client-id",
+        envvar="KEYCLOAK_CLIENT_SECRET",
+    ),
+):
+    """
+    Fill in each member's account subject from Keycloak, by username (REQ-0102).
+
+    For every member in GET /admin/export (the export grant) the Keycloak
+    account whose username is the member's user_id is looked up, through the
+    realm's Admin API (a client holding view-users: --keycloak-token, or
+    --keycloak-client-id/--keycloak-client-secret; without either, the
+    registry's own token is presented). A member holding no subject and naming
+    exactly one account is given that account's id through
+    PATCH /admin/communities/{community}/members/{member} (members.write).
+
+    Dry run unless --apply. Every lookup runs before the first write, so a
+    Keycloak failure leaves the registry as it was. A subject already held is
+    never replaced: one that differs from Keycloak's is counted under
+    "differs". Re-running is safe; written members count as already_set.
+
+    Prints counts only — no member key, username, e-mail or subject. Exits 0,
+    1 when any member differs, is ambiguous or failed to write, and 2 when the
+    registry or Keycloak cannot be read.
+    """
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=user,
+        password=password,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    if keycloak_token:
+        admin_token = keycloak_token
+    elif keycloak_client_id and keycloak_client_secret:
+        _enforce_client_credentials_posture(keycloak_client_id, keycloak_client_secret)
+        admin_token = asyncio.run(
+            _get_token_from_client_credentials(
+                auth_url=auth_url,
+                client_id=keycloak_client_id,
+                client_secret=keycloak_client_secret,
+                verify_ssl=settings.oidc_verify_ssl,
+            )
+        )
+    else:
+        admin_token = access_token
+
+    admin_url = keycloak_url or keycloak_admin_url(auth_url)
+
+    bundles = _read_export(api, access_token, timeout)
+
+    try:
+        plan = plan_subject_backfill(
+            bundles, _keycloak_subjects(admin_url, admin_token, timeout)
+        )
+    except _KeycloakUnreadable as exc:
+        typer.secho(
+            f"Keycloak user search failed ({exc}); nothing was written. A 401 or 403 "
+            "is a token without view-users in the realm.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    written = 0
+    failed = 0
+    if apply:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        for community_key, member_key, subject in plan.to_set:
+            url = _api_url(
+                api,
+                f"/admin/communities/{quote(community_key, safe='')}"
+                f"/members/{quote(member_key, safe='')}",
+            )
+            try:
+                r = httpx.patch(url, json={"subject": subject}, headers=headers, timeout=timeout)
+            except httpx.HTTPError:
+                failed += 1
+                continue
+            if r.status_code >= 400:
+                failed += 1
+            else:
+                written += 1
+
+    typer.echo(f"examined\t{plan.examined}")
+    if apply:
+        typer.echo(f"set\t{written}")
+    else:
+        typer.echo(f"would_set\t{len(plan.to_set)}")
+    typer.echo(f"already_set\t{plan.already_set}")
+    typer.echo(f"no_account\t{plan.no_account}")
+    typer.echo(f"ambiguous\t{plan.ambiguous}")
+    typer.echo(f"differs\t{plan.differs}")
+    typer.echo(f"failed\t{failed}")
+
+    if not apply:
+        typer.secho("Dry run: nothing was written. Pass --apply to write.", err=True)
+
+    if plan.differs or plan.ambiguous or failed:
+        raise typer.Exit(1)
 
 
 def main() -> None:

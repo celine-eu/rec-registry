@@ -2,7 +2,7 @@
 
 `GET /admin/export/members` answers, per community, its areas' boundary and topology
 node ids and, per member, the member key, area, role, type, status and sensor ids. No
-user id, name, DID, delivery point or extra leaves through it: the pipelines need
+user id, account subject, name, DID, delivery point or extra leaves through it: the pipelines need
 membership, not the person (REQ-0100).
 
 Synthetic values only: placeholder e-mails, PODs and substation codes.
@@ -26,6 +26,8 @@ PERSONAL = [
     "Participant One",
     "Participant Two",
     "did:web:dataspace.example:ex-00001",
+    # The account subject (REQ-0101): only the mirrors read it, never the pipelines.
+    "0b6f6c3e-8d2a-4c41-9f0e-5a7d2c1b9e10",
     "IT001E00000001",
     "IT001E00000002",
     "Main residence",
@@ -56,6 +58,7 @@ def _bundle(key: str) -> dict:
                 "user_id": "member.one@example.org",
                 "name": "Participant One",
                 "did": "did:web:dataspace.example:ex-00001",
+                "subject": "0b6f6c3e-8d2a-4c41-9f0e-5a7d2c1b9e10",
                 "type": "schema:Person",
                 "role": "prosumer",
                 "area": "north",
@@ -165,6 +168,7 @@ class TestTheMemberExport:
 
         assert r.status_code == 200, r.text
         assert [v for v in PERSONAL if v in r.text] == []
+        assert '"subject"' not in r.text
 
     async def test_a_community_can_be_named(self, live_client):
         """@verifies REQ-0100"""

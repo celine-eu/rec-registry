@@ -101,6 +101,11 @@ async def export_community_bundle(
         if member.did:
             member_dict["did"] = member.did
 
+        # The backup has to restore what the write API wrote, so the subject is
+        # here — and in no other read (REQ-0101). Only when known, like `did`.
+        if member.subject:
+            member_dict["subject"] = member.subject
+
         member_dict["name"] = member.name
 
         # type stored in extra (no dedicated DB column)
