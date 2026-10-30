@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-10-30)
+
+### Features
+
+- **members**: Keep the account subject beside user_id
+  ([`e6b0349`](https://github.com/celine-eu/rec-registry/commit/e6b0349999ee27756578e7132c028f68dda8f09c))
+
+
 ## v1.7.0 (2026-10-30)
 
 ### Features
