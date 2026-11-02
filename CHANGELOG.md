@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-11-02)
+
+### Features
+
+- **export**: Member mirror export, POD hashes and the mirror-members command
+  ([`fbbb287`](https://github.com/celine-eu/rec-registry/commit/fbbb287dbf2f5857afd2a573412fcd66e5d4e4cc))
+
+
 ## v1.8.0 (2026-10-30)
 
 ### Features
