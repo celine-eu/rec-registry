@@ -22,7 +22,9 @@ satisfies (REQ-0065).
 | `members.purge` | `DELETE …/members/{key}?purge=true` | `rec-registry.members.purge` |
 | `assets.write` | write methods on `…/assets…` | `rec-registry.assets.write` |
 | `community.write` | write methods on a community, its areas (the area rename included) or its topology nodes | `rec-registry.community.write` |
-| `import` / `export` | `/admin/import*`, `/admin/export`, `/admin/export/members` | `rec-registry.import` / `.export` |
+| `import` / `export` | `/admin/import*`, `/admin/export` | `rec-registry.import` / `.export` |
+| `export.members` | `GET /admin/export/members` | `rec-registry.export.members`, or `rec-registry.export` |
+| `mirror` | `GET /admin/export/mirror` | `rec-registry.mirror` (not `.export`) |
 | `lookup` | `/admin/lookup/*` | `rec-registry.lookup` |
 | `assets.lookup` | `/admin/lookup/assets-by-user-ids`, `/admin/lookup/members-by-dids` | `rec-registry.lookup` |
 
@@ -374,7 +376,8 @@ Export communities as YAML multidocument.
 
 The membership of one or more communities, without member identity (REQ-0100): what the
 data pipelines read. `community` may be repeated; omitted, every community is exported, and
-an unknown one is `404`. Granted by `rec-registry.export`.
+an unknown one is `404`. Granted by `rec-registry.export.members` (what the pipelines hold:
+it reaches no other export) or `rec-registry.export`.
 
 **Response:** `application/json`
 
@@ -397,6 +400,39 @@ an unknown one is `404`. Granted by `rec-registry.export`.
 
 Every member is listed whatever its status. No user id, account subject, name, DID,
 delivery point or extra.
+
+**With `POD_HMAC_KEY` set** (prod only, REQ-0105), each member also carries its PODs as
+keyed hashes — HMAC-SHA256 of the id with all whitespace removed and upper-cased, as
+lowercase hex — never as they are:
+
+```json
+{"key": "ex-00001", "area": "north", "role": "consumer", "type": "schema:Person",
+ "status": "active", "sensor_ids": ["ex-sensor-0001", "ex-sensor-0002"],
+ "pod_hashes": ["9b1c…64 hex…"],
+ "meter_pod_hashes": {"ex-sensor-0001": "9b1c…64 hex…", "ex-sensor-0002": null}}
+```
+
+`pod_hashes` covers the member's active delivery points (any type); `meter_pod_hashes`
+each meter's `pod`, `null` when it names none. Without the key both fields are absent, not
+empty.
+
+### `GET /admin/export/mirror`
+
+The member export above plus each member's account `subject` (a lower-case UUID, or `null`):
+what an intermediate environment's member mirror reads from prod (REQ-0103). Same `community`
+filter and `404`. Granted by `rec-registry.mirror` only: `rec-registry.export` is refused, and
+`rec-registry.mirror` reaches no other export.
+
+**Response:** `application/json`, as `GET /admin/export/members` with, per member,
+
+```json
+{"key": "ex-00001", "area": "north", "role": "consumer", "type": "schema:Person",
+ "status": "active", "sensor_ids": ["ex-sensor-0001"],
+ "subject": "0b6f6c3e-8d2a-4c41-9f0e-5a7d2c1b9e10"}
+```
+
+and, with `POD_HMAC_KEY` set, `pod_hashes` and `meter_pod_hashes` exactly as the member
+export carries them (REQ-0105).
 
 ---
 

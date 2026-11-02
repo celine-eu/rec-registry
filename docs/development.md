@@ -29,6 +29,7 @@
 | `POLICIES_PACKAGE` | OPA package to evaluate | `celine.rec_registry.access` |
 | `CELINE_POLICIES_CACHE_ENABLED` | Enable in-memory decision cache | `true` |
 | `CELINE_POLICIES_CACHE_TTL` | Cache TTL in seconds | `300` |
+| `POD_HMAC_KEY` | Key for the POD hashes in the member and mirror exports (REQ-0105); prod only, at least 32 characters, never rotated without re-hashing; unset or empty = no hash fields | unset |
 
 ## Development defaults and `CELINE_ENV`
 

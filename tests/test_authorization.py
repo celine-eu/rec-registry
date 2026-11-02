@@ -216,6 +216,10 @@ class TestScopeMatching:
             "community.write",
             "import",
             "export",
+            # The member export plus the account subject (REQ-0103).
+            "mirror",
+            # The member export alone, what the pipelines hold (REQ-0100).
+            "export.members",
             "lookup",
             # Ninth, and the one that shows why the list is checked as a set:
             # it was added to the middleware and to the bundle together and left
@@ -251,6 +255,7 @@ HOSTILE_WORDS = [
     "lookup",
     "import",
     "export",
+    "mirror",
     "purge",
     "assets",
     "members",

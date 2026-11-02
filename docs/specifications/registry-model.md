@@ -236,7 +236,7 @@ properties); no schema version is published for it.
 **No other read carries it**: not the member read, list, create or `PATCH` answer, not the
 lookups, not self-service, and not the member export (REQ-0100). It is written for the
 member mirrors of the intermediate environments, which create each mirrored account under
-prod's id; a mirror reads it from an export of its own, not from these routes.
+prod's id; a mirror reads it from an export of its own (REQ-0103), not from these routes.
 
 Rows written before the column existed are filled by `backfill-subjects` (REQ-0102).
 

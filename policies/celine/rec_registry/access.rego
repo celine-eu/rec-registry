@@ -158,6 +158,26 @@ allow if {
     data.celine.scopes.has_any_scope(["rec-registry.export", "rec-registry.admin"])
 }
 
+# Member export - the membership without identity (REQ-0100), what the
+# pipelines read. rec-registry.export.members reaches it and no other export;
+# rec-registry.export, which reaches the full export, reaches this subset too.
+allow if {
+    input.action.name == "export.members"
+    data.celine.scopes.has_any_scope([
+        "rec-registry.export.members",
+        "rec-registry.export",
+        "rec-registry.admin",
+    ])
+}
+
+# Mirror action - the member export plus the account subject (REQ-0103), read by
+# an intermediate environment's member mirror job. Not granted by
+# rec-registry.export: the pipelines hold that and need no subject.
+allow if {
+    input.action.name == "mirror"
+    data.celine.scopes.has_any_scope(["rec-registry.mirror", "rec-registry.admin"])
+}
+
 # Lookup action - requires rec-registry.lookup OR rec-registry.admin
 allow if {
     input.action.name == "lookup"
@@ -215,6 +235,12 @@ reason := "admin access granted" if {
 } else := "export access granted" if {
     allow
     input.action.name == "export"
+} else := "member export access granted" if {
+    allow
+    input.action.name == "export.members"
+} else := "mirror access granted" if {
+    allow
+    input.action.name == "mirror"
 } else := "lookup access granted" if {
     allow
     input.action.name == "lookup"

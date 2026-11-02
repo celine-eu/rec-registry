@@ -12,6 +12,7 @@ Commands:
 - out-of-set-values: Report members whose role, status or area is out of set (read-only)
 - invalid-area-boundaries: Report stored areas breaking the one-substation rule (read-only)
 - backfill-subjects: Fill in members' account subjects from Keycloak, by username (dry run by default)
+- mirror-members: Mirror another registry's members into this one, from its mirror export (dry run by default)
 
 Authentication:
 - Client credentials: --client-id + --client-secret (admin operations)
@@ -22,19 +23,20 @@ Authentication:
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 import typer
 import yaml
 
 from celine.sdk.auth import OidcClientCredentialsProvider
-from celine.sdk.posture import InsecureConfiguration, PostureGuard
+from celine.sdk.posture import InsecureConfiguration, PostureGuard, current_env
 from celine.rec_registry.cli.config import settings
 from celine.rec_registry.core.area_boundary import (
     area_boundary_refusals,
@@ -42,7 +44,10 @@ from celine.rec_registry.core.area_boundary import (
 )
 # `find_duplicate_delivery_points` lives with the compared form, so the CLI and
 # the per-community read (REQ-0087) share one definition of a duplicate.
-from celine.rec_registry.core.delivery_point_id import find_duplicate_delivery_points
+from celine.rec_registry.core.delivery_point_id import (
+    find_duplicate_delivery_points,
+    normalise_delivery_point_id,
+)
 from celine.rec_registry.core.member_values import member_value_refusals
 from celine.rec_registry.core.sensor_id import normalise_sensor_id
 
@@ -1924,6 +1929,765 @@ def backfill_subjects(
         typer.secho("Dry run: nothing was written. Pass --apply to write.", err=True)
 
     if plan.differs or plan.ambiguous or failed:
+        raise typer.Exit(1)
+
+
+# =============================================================================
+# Member Mirror
+# =============================================================================
+
+#: The `extra` key that marks a member as written by `mirror-members` (REQ-0104).
+#: Its value names the source (its host, or `file`); only its presence is read.
+MIRROR_MARKER = "mirror_source"
+
+#: A mirrored meter's type. The source exports sensor ids only, so the direction
+#: is not known; `bidirectional` claims none.
+MIRROR_METER_TYPE = "bidirectional"
+
+#: The type of the delivery points a mirror holds: the source's POD hashes
+#: (REQ-0105), never a POD. Only points of this type, on managed members, are written.
+MIRROR_POINT_TYPE = "pod-hmac"
+
+_INACTIVE = "inactive"
+_ACTIVE = "active"
+
+
+def _meter_key(sensor_id: str) -> str:
+    """The asset key a mirrored meter is written under (REQ-0071's convention)."""
+    return f"meter-{sensor_id}"
+
+
+@dataclass
+class MemberMirror:
+    """What a ``mirror-members`` run would write, and what it skipped.
+
+    Every list holds community keys and member keys, which the command never
+    prints; the counts are what it prints. ``creates`` and ``updates`` carry the
+    ``POST`` and ``PATCH`` bodies; ``attaches`` names a sensor id, ``detaches``
+    an asset key.
+
+    From a keyed source (REQ-0105): ``point_adds`` and ``point_removes`` name a
+    ``pod-hmac`` delivery point; ``attach_pods`` gives the ``pod`` of a meter
+    ``attaches`` names; ``meter_pods`` is ``(…, sensor id, old pod, new pod)`` for
+    a meter already attached whose ``pod`` changes.
+    """
+
+    creates: list[tuple[str, str, dict[str, Any]]] = dataclass_field(default_factory=list)
+    updates: list[tuple[str, str, dict[str, Any]]] = dataclass_field(default_factory=list)
+    deactivations: list[tuple[str, str]] = dataclass_field(default_factory=list)
+    attaches: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    detaches: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    source_members: int = 0
+    unchanged: int = 0
+    communities_missing: int = 0
+    skipped_no_community: int = 0
+    skipped_no_area: int = 0
+    skipped_unmanaged_key: int = 0
+    skipped_sensor_held: int = 0
+    point_adds: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    point_removes: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    attach_pods: dict[tuple[str, str, str], str] = dataclass_field(default_factory=dict)
+    meter_pods: list[tuple[str, str, str, str | None, str | None]] = dataclass_field(
+        default_factory=list
+    )
+    skipped_pod_held: int = 0
+    pod_hashes_absent: int = 0
+
+
+def _held_meters(member: dict[str, Any]) -> dict[str, str]:
+    """``{sensor id: asset key}`` for a bundle member's meters, ids trimmed."""
+    meters = ((member.get("assets") or {}).get("meter")) or {}
+    held: dict[str, str] = {}
+    if not isinstance(meters, dict):
+        return held
+    for asset_key, meter in meters.items():
+        if isinstance(meter, dict):
+            sensor_id = normalise_sensor_id(meter.get("sensor_id"))
+            if sensor_id:
+                held[sensor_id] = str(asset_key)
+    return held
+
+
+def _meter_pods(member: dict[str, Any]) -> dict[str, str | None]:
+    """``{sensor id: pod}`` for a bundle member's meters, both in compared form."""
+    meters = ((member.get("assets") or {}).get("meter")) or {}
+    pods: dict[str, str | None] = {}
+    if not isinstance(meters, dict):
+        return pods
+    for meter in meters.values():
+        if isinstance(meter, dict):
+            sensor_id = normalise_sensor_id(meter.get("sensor_id"))
+            if sensor_id:
+                pods[sensor_id] = normalise_delivery_point_id(meter.get("pod"))
+    return pods
+
+
+def _point_ids(member: dict[str, Any]) -> set[str]:
+    """Every delivery point a bundle member lists, any type, in compared form."""
+    return {
+        p
+        for p in (
+            normalise_delivery_point_id(dp.get("id"))
+            for dp in member.get("delivery_points") or []
+            if isinstance(dp, dict)
+        )
+        if p
+    }
+
+
+def _mirror_points(member: dict[str, Any]) -> dict[str, tuple[str, bool]]:
+    """``{compared id: (stored id, active)}`` of a member's ``pod-hmac`` points."""
+    points: dict[str, tuple[str, bool]] = {}
+    for dp in member.get("delivery_points") or []:
+        if not isinstance(dp, dict) or dp.get("type") != MIRROR_POINT_TYPE:
+            continue
+        point_id = normalise_delivery_point_id(dp.get("id"))
+        if point_id:
+            points[point_id] = (str(dp["id"]), dp.get("active", True) is not False)
+    return points
+
+
+def _mirror_meter_body(sensor_id: str, pod: str | None = None) -> dict[str, Any]:
+    """The ``PUT …/assets/meter-<sensor id>`` body of a mirrored meter."""
+    asset_key = _meter_key(sensor_id)
+    properties: dict[str, Any] = {
+        "name": asset_key,
+        "sensor_id": sensor_id,
+        "meter_type": MIRROR_METER_TYPE,
+    }
+    if pod is not None:
+        properties["pod"] = pod
+    return {"key": asset_key, "asset_type": "meter", "properties": properties}
+
+
+def plan_member_mirror(
+    source: dict[str, Any],
+    target: list[dict[str, Any]],
+    *,
+    origin: str,
+) -> MemberMirror:
+    """Decide what makes the target registry mirror the source's members (REQ-0104).
+
+    ``source`` is the source's mirror export (REQ-0103); ``target`` the target's
+    full export, one bundle per community. ``origin`` is the marker's value on
+    a member this run creates.
+
+    A member is *managed* when its ``extra`` holds :data:`MIRROR_MARKER`; only
+    managed members are written. For each source member of a community and an
+    area the target has:
+
+    - none in the target under its key: created, keyed, named and logged in by
+      its member key, with the source's area, role, type, status and subject;
+    - a managed one: patched on the fields that differ (a null type or subject
+      in the source leaves the target's as it is: a patch cannot clear them);
+    - an unmanaged one under its key, or holding its key as ``user_id``:
+      ``skipped_unmanaged_key``, nothing written.
+
+    Its meters follow the source's sensor ids, at ``meter-<sensor id>``; a
+    sensor an active unmanaged member holds anywhere, or whose meter key an
+    unmanaged member of the community holds, is ``skipped_sensor_held``.
+    A managed member the source no longer lists is deactivated, never purged,
+    and keeps its meters but those another member is about to take.
+    Communities and areas are never created.
+
+    A source member carrying ``pod_hashes`` (a keyed source, REQ-0105) makes its
+    mirror's ``pod-hmac`` delivery points exactly those hashes — added, re-added
+    when stored inactive, removed when gone (removed rather than set inactive:
+    an active member holds every point it lists, whatever its flag, REQ-0085) —
+    and each of its meters' ``pod`` the hash ``meter_pod_hashes`` gives, or none.
+    A hash an active unmanaged member holds, as a delivery point or a meter's
+    ``pod``, is ``skipped_pod_held`` (once per member) and neither added nor
+    named by a meter. Points of other types are never touched. A source member
+    without ``pod_hashes`` (a source without the key) is counted in
+    ``pod_hashes_absent`` and its mirror's points and pods are left as they are.
+    """
+    plan = MemberMirror()
+
+    communities: dict[str, dict[str, Any]] = {}
+    for bundle in target:
+        if not isinstance(bundle, dict):
+            continue
+        community = bundle.get("community") or {}
+        key = str(community.get("id") or "")
+        if key:
+            communities[key] = {
+                "areas": set((community.get("areas") or {}).keys()),
+                "members": {
+                    str(mk): m
+                    for mk, m in (bundle.get("members") or {}).items()
+                    if isinstance(m, dict)
+                },
+            }
+
+    def managed(member: dict[str, Any]) -> bool:
+        return MIRROR_MARKER in member
+
+    # Sensors unmanaged members hold, by sensor id: (community, active, asset key).
+    unmanaged_sensors: dict[str, list[tuple[str, bool, str]]] = {}
+    for community_key, community in communities.items():
+        for member in community["members"].values():
+            if managed(member):
+                continue
+            active = member.get("status") == _ACTIVE
+            for sensor_id, asset_key in _held_meters(member).items():
+                unmanaged_sensors.setdefault(sensor_id, []).append(
+                    (community_key, active, asset_key)
+                )
+
+    # Hashes active unmanaged members hold anywhere, as points or meters' pods.
+    unmanaged_pods: set[str] = set()
+    for community in communities.values():
+        for member in community["members"].values():
+            if managed(member) or member.get("status") != _ACTIVE:
+                continue
+            unmanaged_pods |= _point_ids(member)
+            unmanaged_pods |= {p for p in _meter_pods(member).values() if p}
+
+    def sensor_blocked(community_key: str, sensor_id: str) -> bool:
+        for holder_community, active, asset_key in unmanaged_sensors.get(sensor_id, []):
+            if active:
+                return True
+            if holder_community == community_key and asset_key == _meter_key(sensor_id):
+                return True
+        return False
+
+    listed: set[tuple[str, str]] = set()
+    # Sensors this run attaches, so a gone mirror holding one lets it go.
+    claimed: set[str] = set()
+
+    for entry in source.get("communities") or []:
+        if not isinstance(entry, dict):
+            continue
+        community_key = str(entry.get("community") or "")
+        members = [m for m in entry.get("members") or [] if isinstance(m, dict)]
+        plan.source_members += len(members)
+        plan.pod_hashes_absent += sum(1 for m in members if "pod_hashes" not in m)
+        community = communities.get(community_key)
+        if community is None:
+            plan.communities_missing += 1
+            plan.skipped_no_community += len(members)
+            continue
+
+        usernames = {
+            str(m.get("user_id") or ""): mk
+            for mk, m in community["members"].items()
+            if not managed(m)
+        }
+
+        for member in members:
+            member_key = str(member.get("key") or "")
+            if not member_key:
+                continue
+            listed.add((community_key, member_key))
+
+            if member.get("area") not in community["areas"]:
+                plan.skipped_no_area += 1
+                continue
+
+            existing = community["members"].get(member_key)
+            if (existing is not None and not managed(existing)) or (
+                usernames.get(member_key) not in (None, member_key)
+            ):
+                plan.skipped_unmanaged_key += 1
+                continue
+
+            fields: dict[str, Any] = {
+                "user_id": member_key,
+                "area": member.get("area"),
+                "role": member.get("role"),
+                "status": member.get("status"),
+            }
+            if member.get("type") is not None:
+                fields["type"] = member["type"]
+            if member.get("subject"):
+                fields["subject"] = str(member["subject"]).lower()
+
+            wanted: list[str] = []
+            for raw in member.get("sensor_ids") or []:
+                sensor_id = normalise_sensor_id(raw)
+                if not sensor_id or sensor_id in wanted:
+                    continue
+                if sensor_blocked(community_key, sensor_id):
+                    plan.skipped_sensor_held += 1
+                    continue
+                wanted.append(sensor_id)
+
+            if existing is None:
+                plan.creates.append(
+                    (
+                        community_key,
+                        member_key,
+                        {
+                            "key": member_key,
+                            "user_id": member_key,
+                            "name": member_key,
+                            **({"type": fields["type"]} if "type" in fields else {}),
+                            "role": fields["role"],
+                            "area": fields["area"],
+                            "status": fields["status"],
+                            **({"subject": fields["subject"]} if "subject" in fields else {}),
+                            "extra": {MIRROR_MARKER: origin},
+                        },
+                    )
+                )
+                held: dict[str, str] = {}
+                changed = True
+            else:
+                changes = {}
+                for name, value in fields.items():
+                    current = existing.get(name)
+                    if name == "subject" and current is not None:
+                        current = str(current).lower()
+                    if current != value:
+                        changes[name] = value
+                if changes:
+                    plan.updates.append((community_key, member_key, changes))
+                held = _held_meters(existing)
+                changed = bool(changes)
+
+            for sensor_id, asset_key in held.items():
+                if sensor_id not in wanted:
+                    plan.detaches.append((community_key, member_key, asset_key))
+                    changed = True
+            for sensor_id in wanted:
+                claimed.add(sensor_id)
+                if sensor_id not in held:
+                    plan.attaches.append((community_key, member_key, sensor_id))
+                    changed = True
+            if "pod_hashes" in member:
+                changed |= _plan_pods(
+                    plan,
+                    community_key,
+                    member_key,
+                    member,
+                    existing or {},
+                    wanted,
+                    held,
+                    unmanaged_pods,
+                )
+            if not changed:
+                plan.unchanged += 1
+
+    # Mirrors the source no longer lists: deactivated, never purged.
+    for community_key, community in communities.items():
+        for member_key, member in community["members"].items():
+            if not managed(member) or (community_key, member_key) in listed:
+                continue
+            for sensor_id, asset_key in _held_meters(member).items():
+                if sensor_id in claimed:
+                    plan.detaches.append((community_key, member_key, asset_key))
+            if member.get("status") != _INACTIVE:
+                plan.deactivations.append((community_key, member_key))
+
+    return plan
+
+
+def _plan_pods(
+    plan: MemberMirror,
+    community_key: str,
+    member_key: str,
+    member: dict[str, Any],
+    existing: dict[str, Any],
+    wanted: list[str],
+    held: dict[str, str],
+    unmanaged_pods: set[str],
+) -> bool:
+    """Plan one keyed source member's points and meter pods; ``True`` if any change."""
+    blocked: set[str] = set()
+
+    def usable(raw: Any) -> str | None:
+        point_id = normalise_delivery_point_id(raw)
+        if point_id is None:
+            return None
+        if point_id in unmanaged_pods:
+            blocked.add(point_id)
+            return None
+        return point_id
+
+    wanted_points: list[str] = []
+    for raw in member.get("pod_hashes") or []:
+        point_id = usable(raw)
+        if point_id and point_id not in wanted_points:
+            wanted_points.append(point_id)
+
+    raw_pods = member.get("meter_pod_hashes")
+    source_pods = {
+        normalise_sensor_id(sid): pod
+        for sid, pod in (raw_pods.items() if isinstance(raw_pods, dict) else [])
+    }
+    desired = {sensor_id: usable(source_pods.get(sensor_id)) for sensor_id in wanted}
+    plan.skipped_pod_held += len(blocked)
+
+    changed = False
+    current_points = _mirror_points(existing)
+    for point_id in wanted_points:
+        current = current_points.get(point_id)
+        if current is None or not current[1]:
+            plan.point_adds.append((community_key, member_key, point_id))
+            changed = True
+    for point_id, (stored_id, _) in sorted(current_points.items()):
+        if point_id not in wanted_points:
+            plan.point_removes.append((community_key, member_key, stored_id))
+            changed = True
+
+    current_pods = _meter_pods(existing)
+    for sensor_id in wanted:
+        pod = desired[sensor_id]
+        if sensor_id not in held:
+            if pod is not None:
+                plan.attach_pods[(community_key, member_key, sensor_id)] = pod
+        elif current_pods.get(sensor_id) != pod:
+            plan.meter_pods.append(
+                (community_key, member_key, sensor_id, current_pods.get(sensor_id), pod)
+            )
+            changed = True
+    return changed
+
+
+_PROD_ENVS = ("prod", "production")
+
+
+def _refuse(message: str) -> None:
+    """Print why nothing was done, and exit ``2``."""
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(2)
+
+
+def _read_mirror_source(url: str, access_token: str, timeout: float) -> dict[str, Any]:
+    """The source's ``GET /admin/export/mirror``; exit ``2`` if unreadable.
+
+    A failure is reported by status alone: the answer comes from another
+    environment, and nothing it says is echoed.
+    """
+    try:
+        r = httpx.get(
+            _api_url(url, "/admin/export/mirror"),
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        _refuse(f"Source unreachable ({type(exc).__name__}); nothing was written.")
+    if r.status_code >= 400:
+        _refuse(
+            f"Source mirror export failed [{r.status_code}]; nothing was written. "
+            "A 401 or 403 is a source token without rec-registry.mirror."
+        )
+    try:
+        return r.json()
+    except ValueError:
+        _refuse("Source mirror export is not JSON; nothing was written.")
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+@app.command("mirror-members")
+def mirror_members(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write the mirror. Without it nothing is written (dry run).",
+    ),
+    source_url: str | None = typer.Option(
+        None,
+        "--source-url",
+        help="Source registry API base URL, read through GET /admin/export/mirror",
+        envvar="SOURCE_REGISTRY_API_URL",
+    ),
+    source_file: str | None = typer.Option(
+        None,
+        "--source-file",
+        help="A saved mirror export (JSON) instead of --source-url",
+    ),
+    source_token: str | None = typer.Option(
+        None,
+        "--source-token",
+        help="Pre-obtained JWT for the source registry (needs rec-registry.mirror)",
+        envvar="SOURCE_REGISTRY_TOKEN",
+    ),
+    source_client_id: str | None = typer.Option(
+        None,
+        "--source-client-id",
+        help="OAuth2 client ID in the source's realm, holding rec-registry.mirror",
+        envvar="SOURCE_REGISTRY_CLIENT_ID",
+    ),
+    source_client_secret: str | None = typer.Option(
+        None,
+        "--source-client-secret",
+        help="OAuth2 client secret for --source-client-id",
+        envvar="SOURCE_REGISTRY_CLIENT_SECRET",
+    ),
+    source_auth_url: str | None = typer.Option(
+        None,
+        "--source-auth-url",
+        help="The source's OIDC/Keycloak realm URL",
+        envvar="SOURCE_REGISTRY_AUTH_URL",
+    ),
+    source_scope: str | None = typer.Option(
+        None,
+        "--source-scope",
+        help="OAuth2 scope to request from the source's realm",
+        envvar="SOURCE_REGISTRY_SCOPE",
+    ),
+    api: str = typer.Option(
+        settings.base_url,
+        "--api",
+        help="Target registry API base URL",
+        envvar="REGISTRY_API_URL",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Pre-obtained JWT for the target registry",
+        envvar="REGISTRY_TOKEN",
+    ),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="OAuth2 client ID for the target registry",
+        envvar="REGISTRY_CLIENT_ID",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help="OAuth2 client secret for the target registry",
+        envvar="REGISTRY_CLIENT_SECRET",
+    ),
+    auth_url: str = typer.Option(
+        settings.oidc_base_url or "http://localhost:8080/realms/celine",
+        "--auth-url",
+        help="The target's OIDC/Keycloak realm URL",
+        envvar="REGISTRY_AUTH_URL",
+    ),
+    scope: str | None = typer.Option(
+        None,
+        "--scope",
+        help="OAuth2 scope to request from the target's realm",
+        envvar="REGISTRY_SCOPE",
+    ),
+    timeout: float = typer.Option(
+        60.0,
+        "--timeout",
+        help="HTTP timeout in seconds",
+    ),
+):
+    """
+    Mirror the source registry's members into the target registry (REQ-0104).
+
+    Reads the source's GET /admin/export/mirror (rec-registry.mirror, with the
+    source's own client) or --source-file, and the target's GET /admin/export
+    (rec-registry.export). Each source member of a community and area the
+    target has is created or updated there as a mirror: key, user_id and name
+    are the member key; area, role, type, status and subject are the
+    source's; extra.mirror_source marks it; each sensor id becomes a meter at
+    meter-<sensor id>. Mirrors the source no longer lists are deactivated,
+    never purged. Communities and areas are never created, and a member
+    without the marker is never written. From a source holding POD_HMAC_KEY,
+    each mirror's pod-hmac delivery points and meter pods follow the source's
+    POD hashes (REQ-0105); a source without it is counted, not refused. Writes
+    go through the target's admin API: members.write for members and delivery
+    points, assets.write for meters.
+
+    Dry run unless --apply. Refuses to run with CELINE_ENV or ENVIRONMENT set
+    to prod/production, and when source and target URLs name the same host.
+
+    Prints counts only — no community, member key, sensor id or subject.
+    Exits 0, 1 when any write failed, and 2 when it refused or could not read
+    the source or the target (nothing written).
+    """
+    env = current_env()
+    if env in _PROD_ENVS:
+        _refuse(f"Refusing to run with the environment set to {env!r}: a mirror is never prod.")
+
+    if (source_url is None) == (source_file is None):
+        _refuse("Name exactly one source: --source-url or --source-file.")
+
+    if source_url is not None:
+        source_host = (urlparse(source_url).hostname or "").lower()
+        target_host = (urlparse(api).hostname or "").lower()
+        if not source_host or source_host == target_host:
+            _refuse("Refusing to mirror a registry into itself: source and target name the same host.")
+
+    access_token = _resolve_auth(
+        token=token,
+        client_id=client_id,
+        client_secret=client_secret,
+        user=None,
+        password=None,
+        auth_url=auth_url,
+        scope=scope,
+        verify_ssl=settings.oidc_verify_ssl,
+    )
+
+    if source_url is not None:
+        if not source_token and not source_auth_url:
+            _refuse("--source-auth-url is required with --source-client-id/--source-client-secret.")
+        source_access = _resolve_auth(
+            token=source_token,
+            client_id=source_client_id,
+            client_secret=source_client_secret,
+            user=None,
+            password=None,
+            auth_url=source_auth_url or "",
+            scope=source_scope,
+            verify_ssl=settings.oidc_verify_ssl,
+        )
+        source = _read_mirror_source(source_url, source_access, timeout)
+        origin = source_host
+    else:
+        try:
+            source = json.loads(Path(source_file).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _refuse("--source-file is not a readable JSON mirror export.")
+        origin = "file"
+
+    if not isinstance(source, dict) or not isinstance(source.get("communities"), list):
+        _refuse("The source is not a mirror export: no communities list; nothing was written.")
+    if not source["communities"]:
+        _refuse(
+            "The source lists no community; nothing was written. Acting on it would "
+            "deactivate every mirror."
+        )
+
+    bundles = _read_export(api, access_token, timeout)
+    plan = plan_member_mirror(source, bundles, origin=origin)
+
+    done = {
+        "create": 0,
+        "update": 0,
+        "deactivate": 0,
+        "attach_meter": 0,
+        "detach_meter": 0,
+        "add_delivery_point": 0,
+        "remove_delivery_point": 0,
+        "set_meter_pod": 0,
+    }
+    failed = 0
+    if apply:
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        def member_url(community_key: str, member_key: str | None = None) -> str:
+            path = f"/admin/communities/{quote(community_key, safe='')}/members"
+            if member_key is not None:
+                path += f"/{quote(member_key, safe='')}"
+            return _api_url(api, path)
+
+        def send(method: Callable[..., Any], url: str, body: dict | None) -> bool:
+            try:
+                kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
+                if body is not None:
+                    kwargs["json"] = body
+                r = method(url, **kwargs)
+            except httpx.HTTPError:
+                return False
+            return r.status_code < 400
+
+        def count(name: str, ok: bool) -> None:
+            nonlocal failed
+            if ok:
+                done[name] += 1
+            else:
+                failed += 1
+
+        def meter_url(ck: str, mk: str, sensor_id: str) -> str:
+            return f"{member_url(ck, mk)}/assets/{quote(_meter_key(sensor_id), safe='')}"
+
+        def point_url(ck: str, mk: str, point_id: str) -> str:
+            return f"{member_url(ck, mk)}/delivery-points/{quote(point_id, safe='')}"
+
+        # Meters leave before anyone takes them, a point no meter names before it
+        # is removed, holders let a hash go before another takes it, and members
+        # exist before their points and meters are written.
+        for ck, mk, asset_key in plan.detaches:
+            url = f"{member_url(ck, mk)}/assets/{quote(asset_key, safe='')}"
+            count("detach_meter", send(httpx.delete, url, None))
+        pod_writes_ok: list[bool] = []
+        for ck, mk, sensor_id, old, _new in plan.meter_pods:
+            ok = True
+            if old is not None:
+                ok = send(httpx.put, meter_url(ck, mk, sensor_id), _mirror_meter_body(sensor_id))
+                if not ok:
+                    failed += 1
+            pod_writes_ok.append(ok)
+        for ck, mk, point_id in plan.point_removes:
+            count("remove_delivery_point", send(httpx.delete, point_url(ck, mk, point_id), None))
+        for ck, mk in plan.deactivations:
+            count("deactivate", send(httpx.patch, member_url(ck, mk), {"status": _INACTIVE}))
+        for ck, mk, body in plan.updates:
+            count("update", send(httpx.patch, member_url(ck, mk), body))
+        not_created: set[tuple[str, str]] = set()
+        for ck, mk, body in plan.creates:
+            ok = send(httpx.post, member_url(ck), body)
+            if not ok:
+                not_created.add((ck, mk))
+            count("create", ok)
+        for ck, mk, point_id in plan.point_adds:
+            if (ck, mk) in not_created:
+                continue
+            body = {"id": point_id, "type": MIRROR_POINT_TYPE, "active": True}
+            count("add_delivery_point", send(httpx.put, point_url(ck, mk, point_id), body))
+        for ck, mk, sensor_id in plan.attaches:
+            if (ck, mk) in not_created:
+                continue
+            body = _mirror_meter_body(sensor_id, plan.attach_pods.get((ck, mk, sensor_id)))
+            count("attach_meter", send(httpx.put, meter_url(ck, mk, sensor_id), body))
+        for (ck, mk, sensor_id, _old, new), ok in zip(plan.meter_pods, pod_writes_ok):
+            if new is not None:
+                linked = send(
+                    httpx.put, meter_url(ck, mk, sensor_id), _mirror_meter_body(sensor_id, new)
+                )
+                if not linked:
+                    failed += 1
+                ok = ok and linked
+            if ok:
+                done["set_meter_pod"] += 1
+
+    planned = {
+        "create": len(plan.creates),
+        "update": len(plan.updates),
+        "deactivate": len(plan.deactivations),
+        "attach_meter": len(plan.attaches),
+        "detach_meter": len(plan.detaches),
+        "add_delivery_point": len(plan.point_adds),
+        "remove_delivery_point": len(plan.point_removes),
+        "set_meter_pod": len(plan.meter_pods),
+    }
+    past = {
+        "create": "created",
+        "update": "updated",
+        "deactivate": "deactivated",
+        "attach_meter": "attached_meter",
+        "detach_meter": "detached_meter",
+        "add_delivery_point": "added_delivery_point",
+        "remove_delivery_point": "removed_delivery_point",
+        "set_meter_pod": "set_meter_pod",
+    }
+
+    typer.echo(f"source_members\t{plan.source_members}")
+    for name, n in planned.items():
+        if apply:
+            typer.echo(f"{past[name]}\t{done[name]}")
+        else:
+            typer.echo(f"would_{name}\t{n}")
+    typer.echo(f"unchanged\t{plan.unchanged}")
+    typer.echo(f"communities_missing\t{plan.communities_missing}")
+    typer.echo(f"skipped_no_community\t{plan.skipped_no_community}")
+    typer.echo(f"skipped_no_area\t{plan.skipped_no_area}")
+    typer.echo(f"skipped_unmanaged_key\t{plan.skipped_unmanaged_key}")
+    typer.echo(f"skipped_sensor_held\t{plan.skipped_sensor_held}")
+    typer.echo(f"skipped_pod_held\t{plan.skipped_pod_held}")
+    typer.echo(f"pod_hashes_absent\t{plan.pod_hashes_absent}")
+    typer.echo(f"failed\t{failed}")
+
+    if plan.pod_hashes_absent:
+        typer.secho(
+            "The source carries no POD hashes for some members (no POD_HMAC_KEY there): "
+            "their delivery points and meter pods were left as they are.",
+            err=True,
+        )
+
+    if not apply:
+        typer.secho("Dry run: nothing was written. Pass --apply to write.", err=True)
+
+    if failed:
         raise typer.Exit(1)
 
 

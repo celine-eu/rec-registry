@@ -328,8 +328,18 @@ class PolicyMiddleware(BaseHTTPMiddleware):
             return "admin"
 
         if head == "export":
-            if rest in (["export"], ["export", "members"]) and method in _READ_METHODS:
+            if rest == ["export"] and method in _READ_METHODS:
                 return "export"
+            # The member export has a grant of its own: the full export carries
+            # raw PODs, e-mails and names, and the pipelines, which read only
+            # the membership, must not reach it (REQ-0100, REQ-0105).
+            if rest == ["export", "members"] and method in _READ_METHODS:
+                return "export.members"
+            # The mirror export carries the account subject (REQ-0103): a grant
+            # of its own, so the pipelines' `export` does not reach the subject
+            # and the mirror job does not reach the full export.
+            if rest == ["export", "mirror"] and method in _READ_METHODS:
+                return "mirror"
             return "admin"
 
         if head != "communities":

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from celine.rec_registry.core.errors import RegistryError, error_responses
+from celine.rec_registry.core.settings import settings
 from celine.rec_registry.db.session import get_session
 from celine.rec_registry.db.models import Community
 from celine.rec_registry.schemas.bundle import (
@@ -28,6 +29,12 @@ from celine.rec_registry.services.exporter import export_community_bundle, expor
 from celine.rec_registry.core.yaml_io import load_yaml_all, dump_yaml, dump_yaml_all
 
 router = APIRouter()
+
+
+def _pod_hmac_key() -> str | None:
+    """The POD hash key (REQ-0105), or `None` when this registry holds none."""
+    key = settings.pod_hmac_key
+    return key.get_secret_value() if key is not None else None
 
 
 def _refused(exc: ImportRefused) -> RegistryError:
@@ -223,8 +230,10 @@ async def admin_export_members(
     What the pipelines read (REQ-0100): per community its key and each area's
     boundary id and topology node ids; per member its key, area, role, type,
     status and meter sensor ids, every member whatever its status. No user id,
-    name, DID, delivery point or extra. Granted by `rec-registry.export`, like
-    the full export.
+    name, DID, delivery point or extra. With `POD_HMAC_KEY` set, also each
+    member's `pod_hashes` and `meter_pod_hashes` (REQ-0105): its PODs as HMAC
+    hashes, never as they are. Granted by `rec-registry.export`, like the full
+    export.
     """
     if not community:
         keys = sorted(await session.scalars(select(Community.key)))
@@ -234,7 +243,47 @@ async def admin_export_members(
     communities = []
     for key in keys:
         try:
-            communities.append(await export_member_view(session, community_key=key))
+            communities.append(
+                await export_member_view(
+                    session, community_key=key, pod_hmac_key=_pod_hmac_key()
+                )
+            )
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    return {"communities": communities}
+
+
+@router.get("/export/mirror")
+async def admin_export_mirror(
+    community: list[str] | None = Query(None, description="Community key(s) to export; omit to export all"),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Export the membership of one or more communities with each member's account subject.
+
+    What an intermediate environment's member mirror reads from prod (REQ-0103): the
+    member export (REQ-0100) and, per member, its account `subject` (REQ-0101) or
+    null. No user id, name, DID, delivery point or extra. With `POD_HMAC_KEY` set,
+    also `pod_hashes` and `meter_pod_hashes`, as the member export (REQ-0105).
+    Granted by `rec-registry.mirror` only: `rec-registry.export` does not reach it.
+    """
+    if not community:
+        keys = sorted(await session.scalars(select(Community.key)))
+    else:
+        keys = community
+
+    communities = []
+    for key in keys:
+        try:
+            communities.append(
+                await export_member_view(
+                    session,
+                    community_key=key,
+                    with_subject=True,
+                    pod_hmac_key=_pod_hmac_key(),
+                )
+            )
         except KeyError as e:
             raise HTTPException(status_code=404, detail=str(e))
 

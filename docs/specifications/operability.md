@@ -151,6 +151,84 @@ writes a subject onto an existing member: onboarding sends it only on the create
 REQ-0052), so a member the run plans to write held no subject when it was read and is given
 none by anyone else.
 
+### REQ-0104 — the CLI mirrors another registry's members, writes only the members it made, and prints only counts
+
+`celine-rec-registry mirror-members` makes the target registry (`--api`) hold mirrors of a
+source registry's members, for an intermediate environment whose people log in under
+prod's account ids without prod's personal data. It reads the source's mirror export
+(REQ-0103) — `GET <source>/admin/export/mirror` with the source's own client, or a saved
+answer from `--source-file` — and the target's full export, `GET /admin/export`.
+
+A target member is **managed** when its `extra` holds `mirror_source` (the source's host,
+or `file`; only its presence is read). For each source member of a community and an area
+the target has:
+
+- **None under its key:** created through `POST /admin/communities/{ck}/members` with
+  `key`, `user_id` and `name` all the member key, the source's `area`, `role`, `type`,
+  `status` and `subject` (a null `type` or `subject` is left out), and
+  `extra.mirror_source`. No e-mail, DID, delivery point or other extra.
+- **A managed one:** the fields that differ are written through
+  `PATCH /admin/communities/{ck}/members/{mk}`. A null `type` or `subject` in the source
+  leaves the target's as it is.
+- **An unmanaged one under its key, or one holding the key as `user_id`:** counted as
+  `skipped_unmanaged_key`; nothing is written.
+- **Meters follow the source's sensor ids**, each at `meter-<sensor id>` through
+  `PUT …/assets/meter-<sensor id>` with `name` = the asset key and
+  `meter_type: bidirectional` (the source carries no direction); a meter the source no
+  longer lists is removed through `DELETE …/assets/{ak}`. A sensor an active unmanaged
+  member holds in any community (REQ-0069), or whose `meter-<sensor id>` key an unmanaged
+  member of the community holds, is counted as `skipped_sensor_held` and not attached.
+
+**Delivery points follow the source's POD hashes** (REQ-0105), when the source carries
+them. A mirror's delivery points of type `pod-hmac` become exactly its `pod_hashes`, each
+written through `PUT …/delivery-points/{hash}` as `{"id": <hash>, "type": "pod-hmac",
+"active": true}` — added when missing, re-added when stored inactive — and one the source
+no longer lists is **removed** through `DELETE …/delivery-points/{id}`, not set inactive:
+an active member holds every point it lists whatever the point's own flag (REQ-0085), so
+only a removal lets the hash go to another member. Each meter's `pod` becomes its hash in
+`meter_pod_hashes`, or none: on an attach in the meter's body, on a meter already there by
+`PUT`-ting it again. Points of any other type are never written. A hash an active unmanaged
+member holds, as a delivery point or a meter's `pod`, anywhere, is counted once per member
+as `skipped_pod_held`: not added, and no meter is given it. A source member without
+`pod_hashes` — a source without the key — is counted as `pod_hashes_absent` and its
+mirror's points and meter pods are left as they are; the run goes on, and says so on
+standard error. A mirror never holds a POD, only its hash, and never the key.
+
+A community or area the target lacks is never created: its members are counted
+(`communities_missing`, `skipped_no_community`, `skipped_no_area`). A managed member the
+source no longer lists, in any community, is set `inactive` — never purged — and keeps its
+meters, except one whose sensor this run attaches to another member, which is removed
+first. A member without the marker is never written.
+
+- **Dry run unless `--apply`.** Writes run in order — meters removed, meters whose pod
+  changes unlinked, points removed, deactivations, updates, creates, points added, meters
+  attached, changed pods linked — so no point is removed while a meter names it
+  (REQ-0084) and no hash is added before its previous holder let it go (REQ-0085); a member
+  whose create failed gets no point and no meter.
+- **Idempotent.** A second run against an unchanged source plans nothing.
+- **Refuses** (exit `2`, nothing read or written) when `CELINE_ENV` or `ENVIRONMENT` is
+  `prod` or `production`, when `--source-url` and `--api` name the same host, and when both
+  or neither of `--source-url` and `--source-file` are given; it exits `2` with nothing
+  written when the source lists no community — acting on an empty answer would deactivate
+  every mirror.
+- **Counts only.** It prints `source_members`; `would_create`, `would_update`,
+  `would_deactivate`, `would_attach_meter`, `would_detach_meter` (dry run) or `created`,
+  `updated`, `deactivated`, `attached_meter`, `detached_meter`; `unchanged`,
+  `communities_missing`, `skipped_no_community`, `skipped_no_area`,
+  `skipped_unmanaged_key`, `skipped_sensor_held`; `would_add_delivery_point`,
+  `would_remove_delivery_point`, `would_set_meter_pod` (dry run) or
+  `added_delivery_point`, `removed_delivery_point`, `set_meter_pod`; `skipped_pod_held`,
+  `pod_hashes_absent` and `failed`, tab-separated, and never a community, member key,
+  sensor id, subject or hash. A source failure is reported by status
+  alone.
+
+It exits `0`, `1` when any write failed, and `2` when it refused or could not read the
+source or the target. The source client needs `rec-registry.mirror` alone; the target
+client needs `rec-registry.export` (the read), `rec-registry.members.write` (members, and
+the delivery points it grants through `members.delivery_points.write`) and
+`rec-registry.assets.write` (meters). Skips are counted, not failures: a CronJob that
+should alert on them reads the counts.
+
 ### REQ-0087 — a community's shared delivery points are readable per community, naming no one outside it
 
 `GET /admin/communities/{ck}/delivery-points/duplicates` answers `200` with
@@ -271,6 +349,9 @@ person.
   `--token` directly, so neither the client-credentials nor the password grant is
   exercised. `backfill-subjects` (REQ-0102) runs against a mocked Keycloak: its token
   request is never made, and the Admin API's own answer shape and permission are assumed.
+  `mirror-members` (REQ-0104) runs against mocked HTTP and once against the real write
+  API with a `--source-file`: neither token request is made, and the source's answer is
+  assumed to have the shape REQ-0103 pins.
 - **Startup.** `create_app` wiring, settings loading, and the policy engine's bundle load
   at boot. A service that starts with an unloadable Rego bundle is not something any test
   here would notice.

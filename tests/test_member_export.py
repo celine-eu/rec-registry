@@ -102,9 +102,13 @@ async def _seed(client, key: str = "export-rec", *, members: bool = True) -> str
 
 
 class TestTheRouteHasItsOwnShape:
-    def test_reading_it_is_the_export_action(self):
-        """@verifies REQ-0100"""
-        assert action(None, ROUTE, "GET") == "export"
+    def test_reading_it_is_the_export_members_action(self):
+        """A grant of its own: the full export behind `export` carries raw PODs,
+        e-mails and names, and the pipelines must not reach it (REQ-0105).
+
+        @verifies REQ-0100
+        """
+        assert action(None, ROUTE, "GET") == "export.members"
 
     @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
     def test_any_other_method_derives_admin(self, method):
@@ -188,3 +192,58 @@ class TestTheMemberExport:
 
         assert r.status_code == 404
         assert "no-such-rec" in r.json()["detail"]
+
+
+class TestOnlyTheMemberExportGrantReachesIt:
+    """Through the middleware and the real policy bundle, with the session
+    replaced by a dependency that answers 418 once the route is reached."""
+
+    def _client(self, monkeypatch, scopes: str):
+        from celine.sdk.auth import JwtUser
+        from fastapi import FastAPI, HTTPException
+        from fastapi.testclient import TestClient
+
+        from celine.rec_registry.api.admin.management import router
+        from celine.rec_registry.core import middleware as mw
+        from celine.rec_registry.db.session import get_session
+
+        monkeypatch.setattr(mw.settings, "policies_enabled", True)
+        monkeypatch.setattr(mw.settings.policies, "policies_cache_enabled", False)
+
+        async def as_caller(self, request):
+            return JwtUser(sub="svc-example", claims={"scope": scopes})
+
+        monkeypatch.setattr(mw.PolicyMiddleware, "_extract_user", as_caller)
+
+        app = FastAPI()
+        app.add_middleware(mw.PolicyMiddleware)
+        app.include_router(router, prefix="/admin")
+
+        async def reached_the_route():
+            raise HTTPException(status_code=418, detail="reached the route")
+            yield  # pragma: no cover
+
+        app.dependency_overrides[get_session] = reached_the_route
+        return TestClient(app)
+
+    @pytest.mark.parametrize(
+        "scope",
+        ["rec-registry.export.members", "rec-registry.export", "rec-registry.admin"],
+    )
+    def test_these_scopes_reach_it(self, monkeypatch, scope):
+        """`rec-registry.export` keeps reaching it: whoever may read the full
+        export may read a subset of it.
+
+        @verifies REQ-0100
+        """
+        r = self._client(monkeypatch, scope).get(ROUTE)
+        assert r.status_code == 418, r.text
+
+    @pytest.mark.parametrize("route", ["/admin/export", "/admin/export/mirror"])
+    def test_the_member_export_grant_reaches_no_other_export(self, monkeypatch, route):
+        """What the pipelines hold reaches no raw POD, e-mail, name or subject.
+
+        @verifies REQ-0100
+        """
+        r = self._client(monkeypatch, "rec-registry.export.members").get(route)
+        assert r.status_code == 403, r.text

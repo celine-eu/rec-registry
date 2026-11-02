@@ -34,7 +34,7 @@ A participant belonging to a community.
 | `area` | `str` | A key of the community's `areas` — enforced on every write path; rewritten by an area rename (REQ-0079) |
 | `status` | `str` | `pending`, `active`, `suspended`, or `inactive` — enforced on every write path |
 | `delivery_points` | `JSONB` | List of delivery point objects (`id`, `type`, `description`, `address`, `tariff`, `active`) |
-| `extra` | `JSONB` | Extensible properties; `extra.type` holds a schema.org CURIE |
+| `extra` | `JSONB` | Extensible properties; `extra.type` holds a schema.org CURIE; `extra.mirror_source` marks a mirror written by `celine-rec-registry mirror-members` (REQ-0104), the only members that command writes |
 
 A member carries three identifiers and each answers a different question: `key` is what
 this community calls them, `user_id` is who they authenticate as, and `did` is who they are
@@ -47,6 +47,10 @@ dataspace.
 lookup or self-service answer carries it. It is the account's own id, written at
 provisioning (or by `celine-rec-registry backfill-subjects`), for the member mirrors of the
 intermediate environments, which create each mirrored account under prod's id.
+
+In an intermediate environment those mirrors are written by `celine-rec-registry
+mirror-members` (REQ-0104): `key`, `user_id` and `name` are the source's member key, and no
+e-mail, DID or delivery point is stored.
 
 ### Asset
 

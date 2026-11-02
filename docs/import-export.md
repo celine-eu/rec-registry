@@ -160,6 +160,54 @@ delivery point or extra (REQ-0100). It is what the data pipelines read, and it c
 re-imported: use `GET /admin/export` for a backup. See the
 [API reference](api-reference.md#get-adminexportmembers).
 
+### PODs as keyed hashes — `POD_HMAC_KEY`
+
+With `POD_HMAC_KEY` set, the member export and the mirror export add, per member,
+`pod_hashes` (its active delivery points) and `meter_pod_hashes` (its meters' `pod`, by
+sensor id): HMAC-SHA256 under that key of the id with every whitespace removed and
+upper-cased, as lowercase hex (REQ-0105). A POD itself never leaves through either export.
+Without the key both fields are absent; a key shorter than 32 characters stops the service
+from starting.
+
+**Set it in prod only, and never hand it to anyone.** PODs are about 10^8 values: whoever
+holds the key can rebuild the whole mapping, so the hashes protect only against readers
+without it. Staging receives hashes through the mirror, never the key. **Never rotate it**
+without re-hashing every reader's history first — the pipelines key their data on these
+hashes, and a hash under the old key matches nothing under a new one. Losing it orphans
+them all: keep it where the other prod secrets are kept, backed up.
+
+### Mirror export — `GET /admin/export/mirror`
+
+The member export plus each member's account subject (REQ-0103), under `rec-registry.mirror`
+alone: what an intermediate environment's member mirror reads from prod. See the
+[API reference](api-reference.md#get-adminexportmirror).
+
+`celine-rec-registry mirror-members` is that reader (REQ-0104). Run in the intermediate
+environment, it reads the source's mirror export with the source's client and writes the
+local registry's mirrors:
+
+```bash
+export SOURCE_REGISTRY_API_URL=https://<prod api>/rec-registry
+export SOURCE_REGISTRY_AUTH_URL=https://<prod keycloak>/realms/celine
+export SOURCE_REGISTRY_CLIENT_ID=... SOURCE_REGISTRY_CLIENT_SECRET=...   # rec-registry.mirror
+export REGISTRY_API_URL=... REGISTRY_AUTH_URL=...
+export REGISTRY_CLIENT_ID=... REGISTRY_CLIENT_SECRET=...   # export, members.write, assets.write
+celine-rec-registry mirror-members            # dry run: counts only
+celine-rec-registry mirror-members --apply
+```
+
+It never creates a community or area, never writes a member without `extra.mirror_source`,
+deactivates (never purges) mirrors the source no longer lists, and refuses to run with
+`CELINE_ENV=prod` or against a source on the target's host.
+
+When the source holds `POD_HMAC_KEY`, each mirror's delivery points of type `pod-hmac` are
+its source member's `pod_hashes` and each meter's `pod` its hash: added, removed when gone
+(not set inactive, so the hash is free for another member), and skipped — counted as
+`skipped_pod_held` — when an unmanaged active member already holds that hash. A source
+without the key still mirrors members and meters; the run counts `pod_hashes_absent` and
+leaves the points as they are. Delivery points are written under `members.write`; no new
+scope is needed.
+
 ### CLI Export
 
 ```bash

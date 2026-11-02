@@ -17,6 +17,7 @@ from celine.rec_registry.core.versions import (
     MANIFEST_VERSION,
 )
 from celine.rec_registry.core.yaml_io import dump_yaml
+from celine.rec_registry.core.pod_hash import pod_hmac
 
 
 async def export_community_bundle(
@@ -188,7 +189,13 @@ async def export_community_bundle_yaml(
     return dump_yaml(bundle)
 
 
-async def export_member_view(session: AsyncSession, *, community_key: str) -> dict:
+async def export_member_view(
+    session: AsyncSession,
+    *,
+    community_key: str,
+    with_subject: bool = False,
+    pod_hmac_key: str | None = None,
+) -> dict:
     """
     What the pipelines read about a community's members, and nothing that names one.
 
@@ -197,6 +204,16 @@ async def export_member_view(session: AsyncSession, *, community_key: str) -> di
     its status (REQ-0100). No user id, name, DID, delivery point, extra or asset
     property other than a meter's sensor id: the pipelines need the membership, not
     the person.
+
+    With `with_subject`, each member also carries its account `subject` (REQ-0101),
+    or null: the mirror export (REQ-0103), which the member mirrors of an
+    intermediate environment read to recreate the account under the same `sub`.
+
+    With `pod_hmac_key`, each member also carries `pod_hashes` — the sorted HMAC of
+    its active delivery points' ids — and `meter_pod_hashes`, `{sensor id: HMAC of
+    that meter's pod, or null}` (REQ-0105). Without it neither key is there: a
+    registry without the key never pretends to have hashed anything. A raw POD is
+    never in the answer either way.
 
     Raises:
         KeyError: If community not found
@@ -217,8 +234,9 @@ async def export_member_view(session: AsyncSession, *, community_key: str) -> di
             "topology_ids": list((area_data or {}).get("topology") or []),
         }
 
-    members = [
-        {
+    members = []
+    for member in sorted(community.members, key=lambda m: m.key):
+        entry: dict[str, Any] = {
             "key": member.key,
             "area": member.area,
             "role": member.role,
@@ -230,10 +248,34 @@ async def export_member_view(session: AsyncSession, *, community_key: str) -> di
                 if asset.asset_type == "meter" and asset.sensor_id
             ),
         }
-        for member in sorted(community.members, key=lambda m: m.key)
-    ]
+        if with_subject:
+            entry["subject"] = member.subject
+        if pod_hmac_key is not None:
+            entry.update(_pod_hashes(member, pod_hmac_key))
+        members.append(entry)
 
     return {"community": community.key, "areas": areas, "members": members}
+
+
+def _pod_hashes(member: Member, key: str) -> dict[str, Any]:
+    """A member's PODs as REQ-0105 hashes: its active delivery points, its meters' pods.
+
+    A delivery point is active unless its own flag says `false`. A meter without a
+    sensor id has no key to be listed under, and is left out.
+    """
+    points = {
+        digest
+        for point in member.delivery_points or []
+        if isinstance(point, dict) and point.get("active", True) is not False
+        for digest in [pod_hmac(key, point.get("id"))]
+        if digest is not None
+    }
+    meters = {
+        asset.sensor_id: pod_hmac(key, (asset.properties or {}).get("pod"))
+        for asset in sorted(member.assets, key=lambda a: a.sensor_id or "")
+        if asset.asset_type == "meter" and asset.sensor_id
+    }
+    return {"pod_hashes": sorted(points), "meter_pod_hashes": meters}
 
 
 def _build_asset_collection(assets: list[Asset]) -> dict:
